@@ -6,8 +6,6 @@ suscrito al broker clasifica los frames con modelos de Machine Learning y public
 **alertas**. El diseño asume que el tráfico puede ir **cifrado (MQTTS)**, por lo que la
 decisión usa solo features de red/transporte.
 
-> **Bilingüe / Bilingual:** la prosa va en español; los términos técnicos
-> (`Protocol`, `FeatureSource`, `Composition Root`, `Adapter`, etc.) se mantienen en inglés.
 
 ---
 
