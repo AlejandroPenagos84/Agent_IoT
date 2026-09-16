@@ -1,0 +1,10 @@
+.venv
+__pycache__
+**/__pycache__
+*.pyc
+*.zip
+.git
+.gitignore
+ml-mqtt-model.ipynb
+mosquitto/certs
+mosquitto/log

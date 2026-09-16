@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+*.zip
+mosquitto/certs/
+mosquitto/log/
+AGENTS.md

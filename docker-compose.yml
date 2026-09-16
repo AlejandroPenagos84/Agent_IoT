@@ -1,0 +1,95 @@
+x-app: &app
+  build: .
+  image: proyecto:latest
+  entrypoint: ["python"]
+
+services:
+  certgen:
+    image: alpine:3.20
+    container_name: certgen
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        apk add --no-cache openssl >/dev/null
+        mkdir -p /mosquitto/log
+        chmod 777 /mosquitto/log
+        if [ ! -f /certs/server.crt ]; then
+          openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout /certs/server.key -out /certs/server.crt -days 3650 \
+            -subj "/CN=mosquitto" \
+            -addext "subjectAltName=DNS:mosquitto,DNS:localhost,IP:127.0.0.1"
+          cp /certs/server.crt /certs/ca.crt
+        fi
+        chmod 644 /certs/server.key /certs/server.crt /certs/ca.crt
+        echo "certificados listos"
+    volumes:
+      - ./mosquitto/certs:/certs
+      - mosquitto-log:/mosquitto/log
+    restart: "no"
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mosquitto
+    ports:
+      - "1883:1883"
+      - "8883:8883"
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/certs:/mosquitto/certs:ro
+      - mosquitto-log:/mosquitto/log
+    depends_on:
+      certgen:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -t '$$SYS/broker/uptime' -C 1 -W 3 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  agente:
+    <<: *app
+    container_name: agente
+    command:
+      - /app/agente_mqtt.py
+      - --source
+      - plaintext
+      - --model
+      - hybrid
+      - --broker
+      - mosquitto
+      - --modelos
+      - /app/modelos_agente
+      - --log
+      - /mosquitto/log/mosquitto.log
+      - --alert-topic
+      - alertas/deteccion
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    volumes:
+      - mosquitto-log:/mosquitto/log:ro
+      - ./modelos_agente:/app/modelos_agente:ro
+    restart: unless-stopped
+
+  simulador:
+    <<: *app
+    container_name: simulador
+    command:
+      - /app/simulador_iot.py
+      - --broker
+      - mosquitto
+      - --port
+      - "1883"
+      - --ataque
+      - todos
+      - --paquetes
+      - "500"
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  mosquitto-log:
