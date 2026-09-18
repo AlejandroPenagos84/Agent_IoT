@@ -26,5 +26,5 @@ RUN python -m pip install --upgrade pip setuptools wheel && \
 COPY . /app
 
 # Run the simulator by default. Arguments can be overridden at run time.
-ENTRYPOINT ["python", "/app/simulador_iot.py"]
-CMD ["--broker", "mosquitto", "--port", "1883", "--ataque", "todos", "--paquetes", "60"]
+ENTRYPOINT ["python", "-m", "simulation"]
+CMD ["--broker", "mosquitto", "--port", "1883", "--ataque", "dos", "--paquetes", "60"]

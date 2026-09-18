@@ -24,7 +24,7 @@ services:
         chmod 644 /certs/server.key /certs/server.crt /certs/ca.crt
         echo "certificados listos"
     volumes:
-      - ./mosquitto/certs:/certs
+      - ./mosquitto/certs:/certs:z
       - mosquitto-log:/mosquitto/log
     restart: "no"
 
@@ -35,55 +35,91 @@ services:
       - "1883:1883"
       - "8883:8883"
     volumes:
-      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-      - ./mosquitto/certs:/mosquitto/certs:ro
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro,z
+      - ./mosquitto/certs:/mosquitto/certs:ro,z
       - mosquitto-log:/mosquitto/log
-    depends_on:
-      certgen:
-        condition: service_completed_successfully
+    command:
+      - /bin/sh
+      - -c
+      - |
+        i=0
+        until [ -s /mosquitto/certs/server.crt ] && [ -s /mosquitto/certs/server.key ]; do
+          i=$$((i + 1))
+          if [ "$$i" -gt 60 ]; then
+            echo "certificados no disponibles tras 60s" >&2
+            exit 1
+          fi
+          sleep 1
+        done
+        exec /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf
     healthcheck:
-      test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -t '$$SYS/broker/uptime' -C 1 -W 3 >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -i healthcheck -u healthcheck -t '$$SYS/broker/uptime' -C 1 -W 3 >/dev/null 2>&1"]
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
+
+  capture:
+    build:
+      context: .
+      dockerfile: Dockerfile.capture
+    image: proyecto-capture:latest
+    container_name: capture
+    network_mode: "service:mosquitto"
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    command:
+      - --iface
+      - eth0
+      - --filter
+      - ""
+      - --exclude-topic
+      - alertas/deteccion
+      - --out
+      - /capture/features.jsonl
+    volumes:
+      - capture-data:/capture
+    depends_on:
+      mosquitto:
+        condition: service_healthy
     restart: unless-stopped
 
   agente:
     <<: *app
     container_name: agente
     command:
-      - /app/agente_mqtt.py
-      - --source
-      - plaintext
-      - --model
-      - hybrid
-      - --broker
-      - mosquitto
-      - --modelos
-      - /app/modelos_agente
-      - --log
-      - /mosquitto/log/mosquitto.log
-      - --alert-topic
-      - alertas/deteccion
+      - -c
+      - |
+        from composition_root import AgentConfig, build_agent
+        build_agent(AgentConfig(
+            capture_path='/capture/features.jsonl',
+            model_dir='/app/modelos_agente',
+            broker_host='mosquitto',
+            username='agente',
+            alert_topic='alertas/deteccion',
+            model='${MODELO:-lstm}',
+        )).run()
     depends_on:
       mosquitto:
         condition: service_healthy
     volumes:
-      - mosquitto-log:/mosquitto/log:ro
-      - ./modelos_agente:/app/modelos_agente:ro
+      - capture-data:/capture:ro
+      - ./modelos_agente:/app/modelos_agente:ro,z
     restart: unless-stopped
 
   simulador:
     <<: *app
     container_name: simulador
     command:
-      - /app/simulador_iot.py
+      - -m
+      - simulation
       - --broker
       - mosquitto
       - --port
       - "1883"
       - --ataque
-      - todos
+      - ${ATAQUE:-dos}
       - --paquetes
       - "500"
     depends_on:
@@ -93,3 +129,4 @@ services:
 
 volumes:
   mosquitto-log:
+  capture-data:
