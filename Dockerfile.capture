@@ -1,0 +1,14 @@
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1
+
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tshark && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY infrastructure/__init__.py /app/infrastructure/__init__.py
+COPY infrastructure/tshark/__init__.py infrastructure/tshark/stream_features.py infrastructure/tshark/tshark_schema.py /app/infrastructure/tshark/
+
+ENTRYPOINT ["python", "-m", "infrastructure.tshark.stream_features"]
+CMD ["--iface", "eth0", "--out", "/capture/features.jsonl"]

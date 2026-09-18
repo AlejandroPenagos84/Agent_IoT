@@ -3,6 +3,7 @@ from __future__ import annotations
 
 def make_client(client_id: str, username: str | None = None,
                 password: str | None = None, tls: dict | None = None):
+    """Create a paho client compatible with paho MQTT 1.x and 2.x."""
     import paho.mqtt.client as mqtt
 
     try:
