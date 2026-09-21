@@ -21,16 +21,19 @@ Para aplicar cambios del sidecar: `podman-compose up -d --build
 permite restringirlas. Los campos del CSV no disponibles en tshark quedan
 como `null` con un aviso.
 
-La captura incluye `ip.dst` y `tcp.stream` como contexto de conexión, sin
-añadirlos a las features del modelo. El agente mantiene buffers por conexión y
-dirección: `(tcp.stream, ip.src, tcp.srcport, ip.dst, tcp.dstport)`. Así no mezcla
-respuestas del broker a distintos clientes ni conexiones que reutilizan puertos
-en una misma captura. Cada dirección mantiene su propia ventana.
+La captura incluye `ip.dst`, `tcp.stream`, `eth.src` y `eth.dst` como contexto,
+sin añadirlos a las features del modelo. Para TCP, el agente mantiene buffers
+por conexión y dirección:
+`(tcp.stream, ip.src, tcp.srcport, ip.dst, tcp.dstport)`. Para el resto del
+tráfico Ethernet mantiene episodios por par MAC no dirigido y ventanas por
+dirección; un gap mayor que el declarado en `pipeline_config.json` reinicia el
+episodio. Así el despliegue reproduce la población y las ventanas L2 usadas en
+entrenamiento.
 
-En modo por conexión se omiten registros sin IP/puerto de origen o destino;
-`tcp.stream` es opcional para fuentes que no lo proporcionan. Las capturas
-antiguas sin `ip.dst` no sirven en este modo. Reconstruir y recrear `capture` y
-`agente` para activar el nuevo contexto; no hace falta borrar el JSONL.
+En modo por conexión solo se omiten registros que no tienen endpoints TCP
+completos ni `eth.src`, `eth.dst` y `frame.time_epoch`. `tcp.stream` es opcional
+para fuentes que no lo proporcionan. Reconstruir y recrear `capture` y `agente`
+para activar el nuevo contexto; no hace falta borrar el JSONL.
 
 `FrameContext` correlaciona identidad y topic por `tcp.stream`: al observar un
 CONNECT guarda `mqtt.clientid`, y recuerda el último `mqtt.topic` visto. Los

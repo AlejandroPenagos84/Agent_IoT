@@ -9,6 +9,7 @@ from domain.model import ALERT_KIND_CLASS, Alert, FrameContext
 
 DEFAULT_WINDOW = 11
 DEFAULT_NORMAL_LABELS = ('normal',)
+DEFAULT_L2_EPISODE_GAP_SECONDS = 1.0
 
 
 '''
@@ -24,7 +25,8 @@ class Agent:
                  window_size: int = DEFAULT_WINDOW,
                  normal_labels: Sequence[str] = DEFAULT_NORMAL_LABELS,
                  source_name: str = 'agente',
-                 per_flow: bool = True):
+                 per_flow: bool = True,
+                 l2_episode_gap_seconds: float = DEFAULT_L2_EPISODE_GAP_SECONDS):
         """Create the use case with its driven ports injected."""
         self.source = source
         self.classifier = classifier
@@ -33,6 +35,7 @@ class Agent:
         self.normal_labels = set(normal_labels)
         self.source_name = source_name
         self.per_flow = per_flow
+        self.l2_episode_gap_seconds = l2_episode_gap_seconds
         self.emitted = 0
 
     def _emit(self, label: str, context: FrameContext) -> None:
@@ -63,16 +66,30 @@ class Agent:
                 self._classify_and_emit(list(buffer), frame.context)
             return
         buffers: dict = {}
+        l2_last_seen: dict = {}
+        l2_buffer_keys: dict = {}
         for frame in self.source.rows():
             context = frame.context
             # Directional connection: broker replies to different clients must
             # never share a buffer merely because their source port is 1883.
             # tcp.stream also separates successive connections reusing ports.
-            if (not context.ip or not context.dst_ip
-                    or not context.srcport or not context.dstport):
+            if (context.ip and context.dst_ip
+                    and context.srcport and context.dstport):
+                key = ('tcp', context.stream_id, context.ip, context.srcport,
+                       context.dst_ip, context.dstport)
+            elif context.eth_src and context.eth_dst and context.ts is not None:
+                pair = tuple(sorted((context.eth_src, context.eth_dst)))
+                previous = l2_last_seen.get(pair)
+                new_episode = (previous is None or context.ts < previous
+                               or context.ts - previous > self.l2_episode_gap_seconds)
+                if new_episode:
+                    for old_key in l2_buffer_keys.pop(pair, ()):
+                        buffers.pop(old_key, None)
+                l2_last_seen[pair] = context.ts
+                key = ('l2', pair, context.eth_src, context.eth_dst)
+                l2_buffer_keys.setdefault(pair, set()).add(key)
+            else:
                 continue
-            key = (context.stream_id, context.ip, context.srcport,
-                   context.dst_ip, context.dstport)
             buf = buffers.get(key)
             if buf is None:
                 buf = buffers[key] = deque(maxlen=self.window_size)

@@ -23,6 +23,7 @@ class AgentConfig:
     password: str | None = None
     window_size: int = 11
     window_per_flow: bool = True
+    l2_episode_gap_seconds: float = 1.0
     normal_labels: Sequence[str] = ('normal',)
     alert_port: int = 1883
     alert_topic: str = 'alertas/deteccion'
@@ -46,6 +47,10 @@ def build_agent(cfg: AgentConfig) -> Agent:
     if artifact.get('feature_mode') != 'mqtt':
         raise ValueError('El agente MQTT necesita artefactos feature_mode=mqtt. '
                          'Reentrena y exporta desde el notebook actualizado.')
+    if artifact.get('observation_mode') != 'ethernet_tcp_and_l2':
+        raise ValueError('El agente necesita artefactos entrenados con la población '
+                         'Ethernet TCP+L2. Reentrena y exporta desde el notebook '
+                         'actualizado.')
     class_names = set(artifact.get('class_names', []))
     if class_names != BINARY_LABELS:
         raise ValueError('El agente espera artefactos binarios normal/ataque; '
@@ -63,4 +68,6 @@ def build_agent(cfg: AgentConfig) -> Agent:
         normal_labels=cfg.normal_labels,
         source_name='tshark',
         per_flow=cfg.window_per_flow,
+        l2_episode_gap_seconds=float(
+            artifact.get('l2_episode_gap_seconds', cfg.l2_episode_gap_seconds)),
     )

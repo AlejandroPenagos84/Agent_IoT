@@ -2,17 +2,38 @@
   "dataset": "MQTT_UAD",
   "feature_mode": "mqtt",
   "capture_filter": "",
+  "observation_mode": "ethernet_tcp_and_l2",
+  "l2_episode_gap_seconds": 1.0,
   "seq_len": 10,
   "window_size": 11,
   "window_per_flow": true,
   "nan_fill": -1.0,
-  "threshold": 1.0093395709991455,
+  "threshold": 1.478196144104004,
   "normal_idx": 0,
   "class_names": [
     "normal",
     "ataque"
   ],
-  "split_strategy": "connection_grouped_train_val_test",
+  "split_strategy": "tcp_connection_or_l2_episode_grouped_train_val_test",
+  "stream_state": {
+    "tcp_window_key": [
+      "tcp.stream",
+      "ip.src",
+      "tcp.srcport",
+      "ip.dst",
+      "tcp.dstport"
+    ],
+    "l2_episode_pair": [
+      "eth.src",
+      "eth.dst"
+    ],
+    "l2_window_direction": [
+      "eth.src",
+      "eth.dst"
+    ],
+    "l2_episode_gap_seconds": 1.0,
+    "l2_state_reset": "gap strictly greater than threshold or clock rollback"
+  },
   "feature_columns_case1": [
     "frame.len",
     "frame.time_delta",

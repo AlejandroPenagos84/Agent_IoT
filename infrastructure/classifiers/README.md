@@ -16,8 +16,10 @@ de `__init__`/`predict` para que importar el paquete no exija esas dependencias.
 ## Contrato de features (MQTT en claro)
 
 `_common.build_mqtt_features` es el espejo de `build_mqtt_features` de
-`ml-mqtt-model.ipynb`: 13 features compactas, **sin `tcp.srcport`/`tcp.dstport`
-crudos** y sin columnas de identidad, reloj de captura ni duplicados.
+`ml-mqtt-model.ipynb`: 13 features compactas para frames TCP y L2,
+**sin `tcp.srcport`/`tcp.dstport` crudos** y sin columnas de identidad, reloj de
+captura ni duplicados. En frames L2 los campos MQTT/puertos ausentes siguen la
+imputación `nan_fill` declarada en `pipeline_config.json`.
 
 | Grupo | Columnas |
 |---|---|
@@ -49,7 +51,8 @@ rechaza artefactos con otra lista de clases (`composition_root.build_agent`).
 ## `_frame.py`
 
 - `to_frame(window)` — convierte la ventana de `FeatureRow` en un `DataFrame`
-  con las 7 columnas de `infrastructure/tshark/tshark_schema.py`.
+  con el orden canónico de `infrastructure/tshark/tshark_schema.py`; IP, MAC y
+  `tcp.stream` permanecen fuera de esa matriz.
 
 ## `hybrid.py` — `HybridClassifier`
 

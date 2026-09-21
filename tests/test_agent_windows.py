@@ -45,6 +45,11 @@ def frame(client, index, stream=1, reverse=False):
         stream_id=stream, topic=f'topic/{index}'))
 
 
+def l2_frame(src, dst, index, ts=None):
+    return Frame({'marker': index}, FrameContext(
+        ts=float(index if ts is None else ts), eth_src=src, eth_dst=dst))
+
+
 class WindowTests(unittest.TestCase):
     def run_agent(self, frames, **kwargs):
         classifier, sink = Recorder(), Sink()
@@ -71,6 +76,27 @@ class WindowTests(unittest.TestCase):
         classifier, _ = self.run_agent(frames)
         self.assertEqual(classifier.windows, [])
 
+    def test_l2_frames_use_directional_mac_buffers(self):
+        frames = [f for i in range(11) for f in (
+            l2_frame('a', 'broadcast', i),
+            l2_frame('b', 'broadcast', i),
+        )]
+        classifier, sink = self.run_agent(frames)
+        self.assertEqual(len(classifier.windows), 2)
+        self.assertEqual(len(sink.alerts), 2)
+
+    def test_l2_directions_do_not_mix(self):
+        frames = [f for i in range(6) for f in (
+            l2_frame('a', 'b', i), l2_frame('b', 'a', i))]
+        classifier, _ = self.run_agent(frames)
+        self.assertEqual(classifier.windows, [])
+
+    def test_l2_episode_gap_resets_both_directions(self):
+        first = [l2_frame('a', 'b', i, ts=i * 0.01) for i in range(6)]
+        second = [l2_frame('a', 'b', i + 6, ts=2 + i * 0.01) for i in range(6)]
+        classifier, _ = self.run_agent(first + second)
+        self.assertEqual(classifier.windows, [])
+
     def test_alert_context_matches_last_frame_in_both_modes(self):
         for per_flow in (True, False):
             with self.subTest(per_flow=per_flow):
@@ -88,8 +114,20 @@ class WindowTests(unittest.TestCase):
         context = source._context(record)
         self.assertEqual(context.dst_ip, 'a')
         self.assertEqual(context.stream_id, 7)
+        self.assertIsNone(context.eth_src)
         self.assertNotIn('ip.dst', source._features(record))
         self.assertNotIn('tcp.stream', source._features(record))
+
+    def test_l2_context_is_not_a_model_feature(self):
+        values = {'eth.src': 'aa:aa:aa:aa:aa:aa',
+                  'eth.dst': 'ff:ff:ff:ff:ff:ff'}
+        captured = record_from_fields([values.get(field, '') for field in FIELDS])
+        source = TsharkFeatureSource()
+        context = source._context(captured)
+        self.assertEqual(context.eth_src, values['eth.src'])
+        self.assertEqual(context.eth_dst, values['eth.dst'])
+        self.assertNotIn('eth.src', source._features(captured))
+        self.assertNotIn('eth.dst', source._features(captured))
 
     def test_lstm_last_prediction_uses_last_frame(self):
         try:

@@ -52,18 +52,19 @@ sidecar. It captures traffic from the broker's shared `eth0` namespace, writes
 tails that file and converts each JSON record into a `Frame`; the agent never
 reads packets directly.
 
-Las ventanas se separan por conexión y dirección usando IP/puerto de ambos
-endpoints y `tcp.stream` como contexto, sin cambiar las features ML. La última
-predicción corresponde al frame cuyo contexto se publica en la alerta. Tras
-actualizar este flujo, reconstruir y recrear `capture` y `agente`; los registros
-antiguos sin `ip.dst` se omiten en modo por conexión.
+Las ventanas TCP se separan por conexión y dirección usando IP/puerto de ambos
+endpoints y `tcp.stream`. Los demás frames Ethernet se agrupan causalmente en
+episodios por par MAC y en ventanas por dirección; el gap del episodio está
+declarado en `pipeline_config.json`. IP y MAC son solo contexto, no features ML.
+La última predicción corresponde al frame cuyo contexto se publica en la alerta.
+Tras actualizar este flujo, reconstruir y recrear `capture` y `agente`.
 
 Docker provides the default wiring, but capture can also run locally with tshark,
 capture privileges, a valid interface, and a path shared with the agent:
 
 ```bash
 python -m infrastructure.tshark.stream_features \
-  --iface eth0 --filter mqtt --out /tmp/features.jsonl
+  --iface eth0 --filter "" --out /tmp/features.jsonl
 ```
 
 The capture adapter is deployed with the broker network namespace and
@@ -92,7 +93,7 @@ For a local run with the requirements installed and a broker available, start th
 capture and agent in separate terminals:
 
 ```bash
-python -m infrastructure.tshark.stream_features --iface eth0 --filter mqtt --exclude-topic alertas/deteccion --out /tmp/features.jsonl
+python -m infrastructure.tshark.stream_features --iface eth0 --filter "" --exclude-topic alertas/deteccion --out /tmp/features.jsonl
 python -c "from composition_root import AgentConfig, build_agent; build_agent(AgentConfig(capture_path='/tmp/features.jsonl', model_dir='modelos_agente', broker_host='localhost')).run()"
 python -m simulation --broker localhost --port 1883 --paquetes 100 --ataque todos
 ```

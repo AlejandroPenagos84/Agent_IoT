@@ -75,6 +75,7 @@ CAPTURE_FIELDS = (
     'tcp.stream',
 )
 
-# Contexto (IP, identidad, stream) nunca entra en la matriz del modelo.
+# Contexto (IP/MAC, identidad, stream) nunca entra en la matriz del modelo.
 FEATURE_COLUMNS = tuple(c for c in CAPTURE_FIELDS
-                        if c not in ('ip.src', 'ip.dst', 'tcp.stream'))
+                        if c not in ('ip.src', 'ip.dst', 'eth.src', 'eth.dst',
+                                     'tcp.stream'))

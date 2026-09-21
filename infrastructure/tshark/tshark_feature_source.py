@@ -123,6 +123,8 @@ class TsharkFeatureSource(FeatureSource):
             dstport=_to_int(record.get('tcp.dstport'), self.dstport),
             dst_ip=record.get('ip.dst') or None,
             stream_id=stream_id,
+            eth_src=record.get('eth.src') or None,
+            eth_dst=record.get('eth.dst') or None,
         )
 
     def rows(self) -> Iterator[Frame]:
