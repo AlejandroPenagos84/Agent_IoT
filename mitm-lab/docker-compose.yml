@@ -1,0 +1,60 @@
+version: "3.8"
+
+networks:
+  lab_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+services:
+
+  broker:
+    image: eclipse-mosquitto:2
+    container_name: lab_broker
+    networks:
+      lab_net:
+        ipv4_address: 172.28.0.10
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    ports:
+      - "1883:1883"   # opcional, solo para poder inspeccionar desde el host
+
+  iot:
+    build: ./iot
+    container_name: lab_iot
+    networks:
+      lab_net:
+        ipv4_address: 172.28.0.20
+    depends_on:
+      - broker
+    restart: on-failure   # el broker puede tardar unos segundos en levantar
+
+  attacker:
+    build: ./attacker
+    container_name: lab_attacker
+    networks:
+      lab_net:
+        ipv4_address: 172.28.0.30
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    sysctls:
+      - net.ipv4.ip_forward=1   # se fija al crear el contenedor; escribirlo desde dentro falla en Podman rootless
+    depends_on:
+      - broker
+      - iot
+    tty: true          # para poder entrar con docker attach / exec y ver los logs interactivos
+    stdin_open: true
+
+  capture:
+    build: ./capture
+    container_name: lab_capture
+    network_mode: "service:attacker"   # comparte el namespace de red del atacante para ver el mismo tráfico
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    depends_on:
+      - attacker
+    volumes:
+      - ./pcaps:/pcaps
