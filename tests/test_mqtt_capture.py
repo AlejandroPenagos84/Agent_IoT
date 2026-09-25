@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 import shutil
 import struct
@@ -9,7 +8,6 @@ import unittest
 from infrastructure.tshark.stream_features import (
     FIELDS, build_command, build_display_filter, parse_args, record_from_fields,
 )
-from simulation.mqtt_proxy import PublishTransformer
 
 
 def publish(topic, payload, qos=0):
@@ -29,7 +27,7 @@ def publish(topic, payload, qos=0):
     return bytes([0x30 | (qos << 1)]) + bytes(length) + body
 
 
-class CaptureProxyTests(unittest.TestCase):
+class CaptureTests(unittest.TestCase):
     def test_capture_selects_all_frames_by_default_and_all_csv_fields(self):
         command = build_command(parse_args([]))
         self.assertNotIn('-Y', command)
@@ -43,24 +41,6 @@ class CaptureProxyTests(unittest.TestCase):
         record = record_from_fields(['34:30:30', '3'], ('mqtt.msg', 'mqtt.msgtype'))
         self.assertEqual(record['mqtt.msg'], '400')
         self.assertEqual(record['mqtt.msgtype'], '3')
-
-    def test_proxy_handles_fragmented_and_coalesced_packets(self):
-        transformer = PublishTransformer()
-        original = publish('distance/ultrasonic1', '100', qos=1)
-        unchanged = publish('light/rele1', '1')
-        self.assertEqual(transformer.feed(original[:1]), b'')
-        self.assertEqual(transformer.feed(original[1:5]), b'')
-        transformed = transformer.feed(original[5:] + unchanged)
-        self.assertEqual(transformed, publish('distance/ultrasonic1', '900', qos=1) + unchanged)
-        self.assertEqual(len(transformed), len(original) + len(unchanged))
-        self.assertEqual(transformer.modified, 1)
-
-    def test_proxy_preserves_control_messages_and_multibyte_lengths(self):
-        transformer = PublishTransformer()
-        control = b'\xc0\x00'
-        packet = publish('distance/ultrasonic1', '1' * 200)
-        self.assertEqual(transformer.feed(control + packet),
-                         control + publish('distance/ultrasonic1', '9' + '1' * 199))
 
     @unittest.skipUnless(shutil.which('tshark'), 'tshark no instalado')
     def test_actual_tshark_fields_and_payload(self):

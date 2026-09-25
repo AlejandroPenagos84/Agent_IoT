@@ -18,15 +18,14 @@ class Clock:
 
 
 class SimulationTests(unittest.TestCase):
-    def test_todos_covers_every_scenario_with_exact_budget(self):
-        args = parse_args(['--dry-run', '--ataque', 'todos', '--paquetes', '302',
+    def test_dos_uses_exact_budget(self):
+        args = parse_args(['--dry-run', '--ataque', 'dos', '--paquetes', '100',
                            '--burst-size', '100', '--force-attack', '--seed', '42'])
         simulator = Simulator(args)
         with patch('builtins.print'):
             simulator.run()
-        self.assertEqual(simulator.emitted, 302)
-        self.assertEqual(simulator.counts,
-                         {'normal': 2, 'dos': 100, 'mitm': 100, 'intrusion': 100})
+        self.assertEqual(simulator.emitted, 100)
+        self.assertEqual(simulator.counts, {'normal': 0, 'dos': 100})
 
     def test_real_burst_obeys_wall_clock_rate(self):
         args = parse_args(['--ataque', 'dos', '--paquetes', '5',
@@ -59,10 +58,10 @@ class SimulationTests(unittest.TestCase):
         self.assertEqual(simulator.emitted, 0)
         self.assertEqual(stop.call_count, simulator.args.dos_clients)
 
-    def test_invalid_rates_and_insufficient_todos_budget_are_rejected(self):
+    def test_invalid_rates_and_unsupported_attacks_are_rejected(self):
         for argv in (['--dos-rate', '0'], ['--attack-gap', '-1'],
-                     ['--attack-rate', 'nan'], ['--dos-rate', 'inf'],
-                     ['--ataque', 'todos', '--paquetes', '10']):
+                     ['--dos-rate', 'inf'], ['--ataque', 'mitm'],
+                     ['--ataque', 'intrusion'], ['--ataque', 'todos']):
             with self.subTest(argv=argv), patch('sys.stderr'):
                 with self.assertRaises(SystemExit):
                     parse_args(argv)

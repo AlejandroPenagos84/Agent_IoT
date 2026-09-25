@@ -7,7 +7,7 @@ Configuración del broker MQTT usado por `docker-compose.yml`. No es código Pyt
 | Directiva | Valor | Por qué |
 |---|---|---|
 | `persistence false` | — | No se guardan sesiones entre reinicios (simulación efímera). |
-| `allow_anonymous true` | — | Permite CONNECT sin credenciales; es lo que usa el ataque `intrusion` del simulador. |
+| `allow_anonymous true` | — | Simplifica el laboratorio local; no debe usarse así en producción. |
 | `log_dest file /mosquitto/log/mosquitto.log` | — | Log en el volumen compartido (debug). |
 | `log_dest stdout` | — | Log también a la salida del contenedor. |
 | `log_type all` | — | Registra conexiones y publicaciones. |

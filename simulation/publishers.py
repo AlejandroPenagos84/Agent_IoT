@@ -16,15 +16,6 @@ class Publisher(ABC):
     def stop(self) -> None:
         """Release publisher resources."""
 
-    @abstractmethod
-    def subscribe(self, topic_filter: str) -> None:
-        """Subscribe for discovery; raise on rejection."""
-
-    @abstractmethod
-    def observed_topics(self) -> dict[str, str]:
-        """Return topics and latest payloads actually received."""
-
-
 class DryPublisher(Publisher):
     """No-op publisher used to validate scenarios without a broker."""
 
@@ -38,13 +29,6 @@ class DryPublisher(Publisher):
     def stop(self):
         """Release no-op publisher resources."""
         pass
-
-    def subscribe(self, topic_filter):
-        pass
-
-    def observed_topics(self):
-        return {}
-
 
 class MqttPublisher(Publisher):
     """Paho-backed publisher for one simulated MQTT client."""
@@ -60,9 +44,6 @@ class MqttPublisher(Publisher):
         connected = Event()
         self._connection_rc = None
         self._pending = []
-        self._observed = {}
-        self._subscribed = Event()
-        self._subscription_qos = None
 
         def on_connect(client, userdata, flags, rc, *extra):
             self._connection_rc = rc
@@ -70,15 +51,6 @@ class MqttPublisher(Publisher):
 
         self._client.on_connect = on_connect
 
-        def on_message(client, userdata, message):
-            self._observed[message.topic] = message.payload.decode('utf-8', errors='replace')
-
-        def on_subscribe(client, userdata, mid, granted_qos, *extra):
-            self._subscription_qos = granted_qos
-            self._subscribed.set()
-
-        self._client.on_message = on_message
-        self._client.on_subscribe = on_subscribe
         try:
             self._client.connect(host, port, 60)
             self._client.loop_start()
@@ -118,18 +90,3 @@ class MqttPublisher(Publisher):
         finally:
             self._client.disconnect()
             self._client.loop_stop()
-
-    def subscribe(self, topic_filter):
-        self._subscribed.clear()
-        rc, _ = self._client.subscribe(topic_filter, qos=0)
-        if rc != 0 or not self._subscribed.wait(10):
-            raise RuntimeError(
-                f'{self.client_id}: error/timeout en SUBSCRIBE {topic_filter}'
-            )
-        if not self._subscription_qos or any(qos >= 128 for qos in self._subscription_qos):
-            raise RuntimeError(
-                f'{self.client_id}: suscripción rechazada a {topic_filter}'
-            )
-
-    def observed_topics(self):
-        return self._observed.copy()

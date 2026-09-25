@@ -1,8 +1,10 @@
-# MQTT/IoT intrusion detection
+# MQTT/IoT DoS detection
 
-Detects DoS, MitM, and intrusion activity in real MQTT traffic captured with
-tshark. The agent uses a hybrid XGBoost + LSTM model and network/transport
-features only; application payloads are never used for classification.
+Detects DoS activity in real MQTT traffic captured with tshark. This branch is
+the DoS-only version of the project; the multi-attack version lives in
+`feature/advance_model`. The agent uses a hybrid XGBoost + LSTM model and
+network/transport features only; application payloads are never used for
+classification.
 
 ## Architecture
 
@@ -78,14 +80,13 @@ docker compose up --build  # or: podman-compose up --build
 
 Compose starts certificate generation, Mosquitto, capture, the agent, and the
 simulator. Set `ATAQUE` to select the simulator scenario (default: `dos`).
-El modo `todos` recorre los tres escenarios en orden, con ráfagas y ritmos
-configurables en tiempo real. `mitm` es sintético y `intrusion` es un intento
-anónimo, no ataques confirmados; ver [simulation/README.md](simulation/README.md).
+Esta rama admite únicamente tráfico normal (`none`) y ráfagas DoS (`dos`); ver
+[simulation/README.md](simulation/README.md).
 
 Without a broker:
 
 ```bash
-python -m simulation --dry-run --ataque todos --force-attack
+python -m simulation --dry-run --ataque dos --force-attack
 ```
 
 For a local run with the requirements installed and a broker available, start the
@@ -94,14 +95,16 @@ capture and agent in separate terminals:
 ```bash
 python -m infrastructure.tshark.stream_features --iface eth0 --filter mqtt --exclude-topic alertas/deteccion --out /tmp/features.jsonl
 python -c "from composition_root import AgentConfig, build_agent; build_agent(AgentConfig(capture_path='/tmp/features.jsonl', model_dir='modelos_agente', broker_host='localhost')).run()"
-python -m simulation --broker localhost --port 1883 --paquetes 100 --ataque todos
+python -m simulation --broker localhost --port 1883 --paquetes 100 --ataque dos
 ```
 
 ## Models and limitations
 
-`ml-mqtt-model.ipynb` exports `modelos_agente/`; `pipeline_config.json` defines
-the feature order. Do not edit model artifacts manually: changing features
-requires retraining. Network models do not use raw ports as features.
+`ml-mqtt-model.ipynb` trains only with `dataset/DoS.csv` and exports
+`modelos_agente/`; `pipeline_config.json` defines the feature order. Reexport
+the complete artifact package after running the notebook: the binaries already
+stored in the repository predate this branch split. Do not edit model artifacts
+manually. Network models do not use raw ports as features.
 
 Compose uses plaintext MQTT on port 1883. To capture TLS without decryption, use
 `tcp.port == 8883`; the `mqtt` filter requires visible MQTT protocol fields.
