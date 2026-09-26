@@ -106,6 +106,12 @@ the complete artifact package after running the notebook: the binaries already
 stored in the repository predate this branch split. Do not edit model artifacts
 manually. Network models do not use raw ports as features.
 
+El notebook usa Optuna para ajustar por separado XGBoost, el autoencoder LSTM y
+el XGBoost híbrido, maximizando macro-F1 únicamente sobre la partición de
+validación agrupada por conexión. El test queda fuera de todos los trials y se
+usa una sola vez para la evaluación final. La exportación incluye
+`optuna_studies.json` con parámetros y resultados reproducibles de cada estudio.
+
 Compose uses plaintext MQTT on port 1883. To capture TLS without decryption, use
 `tcp.port == 8883`; the `mqtt` filter requires visible MQTT protocol fields.
 `client_id` is currently unavailable in captured PUBLISH frames, CONNECT events
