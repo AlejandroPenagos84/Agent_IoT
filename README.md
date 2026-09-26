@@ -107,9 +107,10 @@ stored in the repository predate this branch split. Do not edit model artifacts
 manually. Network models do not use raw ports as features.
 
 El notebook usa Optuna para ajustar por separado XGBoost, el autoencoder LSTM y
-el XGBoost híbrido, maximizando macro-F1 únicamente sobre la partición de
-validación agrupada por conexión. El test queda fuera de todos los trials y se
-usa una sola vez para la evaluación final. La exportación incluye
+el XGBoost híbrido, maximizando el macro-F1 medio de 3-fold cross-validation
+interna agrupada por conexión. El test externo queda fuera de todos los trials y
+se usa una sola vez para la evaluación final. El MSE de entrenamiento del híbrido
+se genera out-of-fold. La exportación incluye
 `optuna_studies.json` con parámetros y resultados reproducibles de cada estudio.
 
 Compose uses plaintext MQTT on port 1883. To capture TLS without decryption, use
