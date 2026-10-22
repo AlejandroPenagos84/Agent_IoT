@@ -94,11 +94,12 @@ services:
         from composition_root import AgentConfig, build_agent
         build_agent(AgentConfig(
             capture_path='/capture/features.jsonl',
-            model_dir='/app/modelos_agente',
+            model_dir=('/app/modelos_agente_tcp' if '${MODELO:-tcp}' == 'tcp'
+                       else '/app/modelos_agente'),
             broker_host='mosquitto',
             username='agente',
             alert_topic='alertas/deteccion',
-            model='${MODELO:-lstm}',
+            model='${MODELO:-tcp}',
         )).run()
     depends_on:
       mosquitto:
@@ -106,6 +107,7 @@ services:
     volumes:
       - capture-data:/capture:ro
       - ./modelos_agente:/app/modelos_agente:ro,z
+      - ./modelos_agente_tcp:/app/modelos_agente_tcp:ro,z
     restart: unless-stopped
 
   simulador:

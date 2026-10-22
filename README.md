@@ -83,6 +83,13 @@ simulator. Set `ATAQUE` to select the simulator scenario (default: `dos`).
 Esta rama admite únicamente tráfico normal (`none`) y ráfagas DoS (`dos`); ver
 [simulation/README.md](simulation/README.md).
 
+El agente usa por defecto el modelo TCP (`MODELO=tcp`, `modelos_agente_tcp/`). Para
+ver las alertas mientras corre el simulador:
+
+```bash
+podman exec mosquitto mosquitto_sub -h localhost -t alertas/deteccion -v
+```
+
 Without a broker:
 
 ```bash

@@ -45,12 +45,19 @@ context, yielding Frame objects.
 class TsharkFeatureSource(FeatureSource):
     """Tail capture JSONL and yield application ``Frame`` objects."""
     def __init__(self, path: str = DEFAULT_CAPTURE, from_start: bool = False,
-                 poll: float = 0.05, dstport: int = 1883) -> None:
-        """Configure the file path, start position, poll interval, and fallback port."""
+                 poll: float = 0.05, dstport: int = 1883,
+                 feature_key: str | None = None) -> None:
+        """Configure the file path, start position, poll interval, and fallback port.
+
+        With ``feature_key`` (e.g. ``'tcp_features'``) the features are the dict the
+        sidecar stored under that key, and records where it is null (outside the
+        model's scope) are skipped.
+        """
         self.path = path
         self.from_start = from_start
         self.poll = poll
         self.dstport = dstport
+        self.feature_key = feature_key
         self._offset = 0
         self._stop = False
         self._partial = ''
@@ -75,8 +82,11 @@ class TsharkFeatureSource(FeatureSource):
         except OSError:
             return 0
 
-    def _features(self, record: dict) -> FeatureRow:
+    def _features(self, record: dict) -> FeatureRow | None:
         """Extract and normalize the model's numeric feature columns."""
+        if self.feature_key is not None:
+            precomputed = record.get(self.feature_key)
+            return dict(precomputed) if isinstance(precomputed, dict) else None
         return {key: (_to_float(record.get(key)) if key in NETWORK_COLUMNS
                       else record.get(key)) for key in FEATURE_COLUMNS}
 
@@ -151,5 +161,10 @@ class TsharkFeatureSource(FeatureSource):
                     record = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                yield Frame(features=self._features(record),
-                            context=self._context(record))
+                # El contexto se resuelve siempre: guarda client_id/topic del CONNECT
+                # aunque ese frame no tenga features.
+                context = self._context(record)
+                features = self._features(record)
+                if features is None:
+                    continue
+                yield Frame(features=features, context=context)
