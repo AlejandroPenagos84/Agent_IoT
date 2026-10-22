@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import random
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
-from .attacks import build_attack_packet
+from .attacks import build_attack_packet, build_flood_packets
 from .devices import build_devices
 from .publishers import DryPublisher, MqttPublisher, Publisher
 
@@ -25,6 +27,8 @@ class Simulator:
         self.emitted = 0
         self.counts = dict.fromkeys(('normal', 'dos'), 0)
         self._started = None
+        self._bursts = 0
+        self._lock = threading.Lock()
 
     def _refresh_time(self):
         if not self.args.dry_run:
@@ -58,6 +62,12 @@ class Simulator:
         """Get or create the cached publisher for a simulated client."""
         if client_id in self._publishers:
             return self._publishers[client_id]
+        publisher = self._new_publisher(client_id)
+        self._publishers[client_id] = publisher
+        return publisher
+
+    def _new_publisher(self, client_id):
+        """Create a publisher (and its MQTT connection) without caching it."""
         if self.args.dry_run:
             publisher = DryPublisher(client_id)
         else:
@@ -74,7 +84,6 @@ class Simulator:
                 password=self.args.password,
                 tls=self.tls,
             )
-        self._publishers[client_id] = publisher
         return publisher
 
     def _log(self, client_id, topic, payload, origen):
@@ -98,7 +107,55 @@ class Simulator:
                 )
 
     def attack_burst(self):
-        """Publish a bounded DoS burst paced by elapsed wall-clock time."""
+        """Run one DoS burst in the configured mode."""
+        if self.args.dos_mode == 'flood':
+            self.flood_burst()
+        else:
+            self.persistent_burst()
+
+    def _flood_client(self, packets):
+        """Connect a new client, publish all its packets back-to-back, disconnect."""
+        publisher = self._new_publisher(packets[0].client_id)
+        try:
+            for packet in packets:
+                rc = publisher.publish(packet.topic, packet.payload, packet.qos)
+                if rc != 0:
+                    raise RuntimeError(f'Publicación fallida: client={packet.client_id}, '
+                                       f'topic={packet.topic}, rc={rc}')
+                with self._lock:
+                    self.emitted += 1
+                    self.counts['dos'] += 1
+        finally:
+            publisher.stop()
+        if self.args.verbose or self.args.dry_run:
+            print(f"[t={self.t:7.2f}] dos     | {packets[0].client_id:16s} "
+                  f"-> {len(packets)} publicaciones y desconexión")
+
+    def flood_burst(self):
+        """Flood of new connections, like mqtt-malaria in `DoS.csv`.
+
+        Each burst opens ``dos_clients`` new MQTT connections at the same time; each
+        one publishes its share of the burst without pacing (so TCP packs several
+        PUBLISH per segment) and disconnects.
+        """
+        burst = min(self.args.burst_size, self.args.paquetes - self.emitted)
+        clients = min(self.args.dos_clients, burst)
+        shares = [burst // clients + (1 if i < burst % clients else 0) for i in range(clients)]
+        plans = [build_flood_packets(self._bursts, i, n, self.args.dos_payload_size)
+                 for i, n in enumerate(shares)]
+        self._bursts += 1
+        self._refresh_time()
+        started = self.t
+        print(f"    >>> Ráfaga 'dos' (flood): {clients} conexiones nuevas, "
+              f"{burst} publicaciones <<<")
+        with ThreadPoolExecutor(max_workers=clients) as pool:
+            for future in [pool.submit(self._flood_client, plan) for plan in plans]:
+                future.result()
+        self._refresh_time()
+        print(f"    >>> Fin 'dos' (flood): {self.t - started:.3f}s <<<")
+
+    def persistent_burst(self):
+        """Publish a bounded DoS burst over persistent clients, paced by wall clock."""
         tipo = 'dos'
         burst = min(self.args.burst_size, self.args.paquetes - self.emitted)
         rate = self.args.dos_rate

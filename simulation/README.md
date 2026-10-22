@@ -15,8 +15,8 @@ El simulador público genera tráfico normal (`--ataque none`) o ráfagas DoS
 alertas. El tráfico normal comparte ese presupuesto.
 
 ```bash
-python -m simulation --broker localhost --ataque dos --paquetes 500 \
-  --burst-size 100 --dos-rate 100 --attack-gap 5 \
+python -m simulation --broker localhost --ataque dos --dos-mode persistent \
+  --paquetes 500 --burst-size 100 --dos-rate 100 --attack-gap 5 \
   --force-attack --seed 42 --verbose
 ```
 
@@ -33,10 +33,21 @@ exactamente la captura histórica. Los dispositivos publican lecturas
 numéricas a `distance/ultrasonic1` y valores `0`/`1` a `light/rele1`, topics
 presentes en el CSV local.
 
-- `dos`: publicaciones multicliente en `mqtt-malaria/.../data/...`, con payload
-  hexadecimal de longitud configurable. `--dos-clients` (5 por defecto),
-  `--dos-payload-size` (100 por defecto) y `--dos-rate` controlan la carga.
+- `dos`: por defecto (`--dos-mode flood`) reproduce el patrón de `DoS.csv`
+  (herramienta mqtt-malaria): cada ráfaga abre `--dos-clients` conexiones **nuevas**
+  a la vez (50 por defecto, client_id único por ráfaga), cada una publica su parte de
+  `--burst-size` (10000 por defecto, 200 por cliente) sin pausas a
+  `mqtt-malaria/<cliente>/data/<n>/<total>` y se desconecta. `--dos-rate` no aplica
+  en este modo. `--dos-payload-size` (100) fija el payload hexadecimal.
+- `--dos-mode persistent`: el escenario anterior, con 5 clientes reutilizados y ritmo
+  `--dos-rate`. **Limitación conocida:** el modelo TCP solo vio el flood de conexiones
+  de `DoS.csv`; con clientes persistentes `tcp_new_conns_5s` es 0 y el modelo marca
+  solo ~25 % de los frames del atacante. Se mantiene para documentar ese límite.
   Generar carga no demuestra por sí sola una denegación de servicio.
+
+En Compose, `ATAQUE` (`dos`), `DOS_MODE` (`flood`) y `PAQUETES` (`30000`, tres
+ráfagas flood) configuran el simulador. Con `ATAQUE=none` usa un `PAQUETES` pequeño:
+el tráfico normal publica cada ~2-5 s.
 
 La etiqueta del escenario no es ground truth de frames ni una etiqueta ML.
 El simulador no inventa features ni etiquetas de captura; tshark extrae los

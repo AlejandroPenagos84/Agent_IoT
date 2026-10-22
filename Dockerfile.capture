@@ -8,7 +8,7 @@ RUN apt-get update && \
 
 WORKDIR /app
 COPY infrastructure/__init__.py /app/infrastructure/__init__.py
-COPY infrastructure/tshark/__init__.py infrastructure/tshark/stream_features.py infrastructure/tshark/tshark_schema.py /app/infrastructure/tshark/
+COPY infrastructure/tshark/__init__.py infrastructure/tshark/stream_features.py infrastructure/tshark/tshark_schema.py infrastructure/tshark/tcp_window_features.py /app/infrastructure/tshark/
 
 ENTRYPOINT ["python", "-m", "infrastructure.tshark.stream_features"]
 CMD ["--iface", "eth0", "--out", "/capture/features.jsonl"]

@@ -1,0 +1,50 @@
+{
+  "version": "tcp-B-v2",
+  "generated_at": "2026-10-22T17:21:53+00:00",
+  "generated_by": "ML_Model/03_modelo_tcp.ipynb",
+  "seed": 42,
+  "training_scope": "mqtt_ports",
+  "source_artifact": {
+    "path": "ML_Model/artifacts/df_raw.joblib",
+    "sha256": "1554de54a5a32d6cc9047227712043c03ddd7bb8fee3b3b576ab48cd403921df"
+  },
+  "feature_columns": [
+    "frame.len",
+    "fe_log_len",
+    "frame.time_delta",
+    "fe_is_standard_mqtt_port",
+    "fe_is_broker_to_client",
+    "tcp_iat",
+    "tcp_iat_std_5s",
+    "tcp_frames_5s",
+    "tcp_bytes_5s",
+    "tcp_len_std_5s",
+    "tcp_asymmetry_5s",
+    "tcp_new_conns_5s"
+  ],
+  "n_features": 12,
+  "training_rows": 61654,
+  "counts_by_class": {
+    "DoS": 45330,
+    "normal": 16324
+  },
+  "counts_by_capture_and_class": {
+    "DoS": {
+      "DoS": 45330,
+      "normal": 969
+    },
+    "Intrusion": {
+      "normal": 7700
+    },
+    "MitM": {
+      "normal": 7655
+    }
+  },
+  "files": {
+    "xgb_tcp.ubj": "f9260bc82a6e1ed51601a657212d67e823336a8d01eb20dd0ba2ced4cff5470b",
+    "le_target.joblib": "4b027febf1f9ba0489d801aa85416d79c2e5f0a6004d4836d7fe848feeb85415",
+    "pipeline_config.json": "eb4e5aa0a32d3dc4305192ad9ddb029ebfd021dd49e37ee43da20c6961ff72f6",
+    "metrics.json": "ccaf6aeb94e4b82b14c5e314ead9dd8985d8d3a0270f00a190cf185d390df891",
+    "evaluation_split.json": "987bd9cc36727d6d648f05ee2aa815bc6ccfe73447b44b17ef4db0783e517f00"
+  }
+}

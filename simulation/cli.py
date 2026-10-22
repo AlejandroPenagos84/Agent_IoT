@@ -26,21 +26,31 @@ def parse_args(argv=None):
     ap.add_argument('--password', default=None)
     ap.add_argument('--force-attack', action='store_true',
                     help='Primer ataque inmediato')
-    ap.add_argument('--burst-size', type=int, default=100,
-                    help='Publicaciones por ráfaga')
+    ap.add_argument('--dos-mode', dest='dos_mode', default='flood',
+                    choices=['flood', 'persistent'],
+                    help='flood: conexiones nuevas por ráfaga, como DoS.csv (por defecto); '
+                         'persistent: clientes reutilizados (fuera del entrenamiento)')
+    ap.add_argument('--burst-size', type=int, default=None,
+                    help='Publicaciones por ráfaga (flood: 10000 = 50 conexiones x 200, persistent: 100)')
     ap.add_argument('--dos-rate', type=float, default=100,
-                    help='Publicaciones/segundo durante DoS')
+                    help='Publicaciones/segundo durante DoS persistente (flood no se limita)')
     ap.add_argument('--attack-gap', type=float, default=5,
                     help='Segundos entre ráfagas')
     ap.add_argument('--seed', type=int, default=None,
                     help='Semilla para reproducir payloads y horarios')
-    ap.add_argument('--dos-clients', type=int, default=5)
+    ap.add_argument('--dos-clients', type=int, default=None,
+                    help='Clientes por ráfaga (flood: 50 conexiones nuevas, persistent: 5)')
     ap.add_argument('--dos-payload-size', type=int, default=100)
     ap.add_argument('--verbose', action='store_true')
     ap.add_argument('--debug', action='store_true')
     ap.add_argument('--dry-run', dest='dry_run', action='store_true',
                     help='No conecta al broker; solo imprime lo que publicaría')
     args = ap.parse_args(argv)
+    flood = args.dos_mode == 'flood'
+    if args.burst_size is None:
+        args.burst_size = 10000 if flood else 100
+    if args.dos_clients is None:
+        args.dos_clients = 50 if flood else 5
     for name in ('paquetes', 'burst_size', 'dos_rate', 'intervalo',
                  'dos_clients', 'dos_payload_size'):
         if not math.isfinite(getattr(args, name)) or getattr(args, name) <= 0:

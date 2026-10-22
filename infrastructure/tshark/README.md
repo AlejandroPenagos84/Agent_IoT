@@ -10,6 +10,16 @@ context plus model features.
 `tshark_schema.py` defines the canonical network column order shared by capture,
 frame conversion, and classifiers.
 
+`tcp_window_features.py` (`TcpWindowFeatures`) calcula en línea las 12 features TCP
+del modelo B y `stream_features.py` las guarda en cada registro como
+`tcp_features` (dict en el orden de `TCP_FEATURE_COLUMNS`). Es el espejo incremental
+de `ML_Model/data_preprocessing/tcp_features.py`: mismas ventanas causales de 5 s y
+mismas claves de conexión (endpoints + nº de CONNECT) y dirección.
+`tests/test_tcp_window_features.py` comprueba que coincide exactamente con la matriz
+de entrenamiento sobre `DoS.csv`. Como el modelo se entrenó con la vista `mqtt`,
+`tcp_features` es `null` en frames sin puerto 1883/8883, y esos frames tampoco entran
+en las ventanas. Solo usa la biblioteca estándar.
+
 `Dockerfile.capture` empaqueta únicamente los módulos del recolector y su
 schema, además de los `__init__.py`. No necesita `application`, `domain` ni
 dependencias ML. El paquete carga `TsharkFeatureSource` de forma lazy solo

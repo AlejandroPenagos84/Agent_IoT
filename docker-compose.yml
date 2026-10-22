@@ -120,8 +120,10 @@ services:
       - "1883"
       - --ataque
       - ${ATAQUE:-dos}
+      - --dos-mode
+      - ${DOS_MODE:-flood}
       - --paquetes
-      - "500"
+      - "${PAQUETES:-30000}"
     depends_on:
       mosquitto:
         condition: service_healthy
