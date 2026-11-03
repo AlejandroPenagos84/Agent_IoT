@@ -107,6 +107,7 @@ services:
     volumes:
       - capture-data:/capture:ro
       - alert-data:/alerts
+      - processed-data:/processed:ro
       - ./modelos_agente:/app/modelos_agente:ro,z
     restart: unless-stopped
 
@@ -129,7 +130,24 @@ services:
         condition: service_healthy
     restart: "no"
 
+  summaries:
+    <<: *app
+    container_name: summaries
+    command:
+      - -m
+      - infrastructure.alert_processing.summaries
+      - --input
+      - /alerts/normalized/alerts.parquet
+      - --output
+      - /processed/summaries
+    volumes:
+      - alert-data:/alerts:ro
+      - processed-data:/processed
+    profiles:
+      - etl
+
 volumes:
   mosquitto-log:
   capture-data:
   alert-data:
+  processed-data:

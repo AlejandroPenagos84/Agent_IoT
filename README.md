@@ -134,3 +134,38 @@ JSON inválidas o registros con errores en `processing_errors.jsonl` y conserva
 los duplicados detectados en `duplicates.jsonl`. Los valores ausentes permanecen
 como `null`; no se descarta una alerta solo por compartir cliente, IP o tópico.
 La salida requiere `pyarrow`, incluido en `requirements.txt`.
+
+## Resúmenes analíticos
+
+Los agregados se generan desde el Parquet normalizado y no modifican las alertas:
+
+```bash
+python -m infrastructure.alert_processing.summaries \
+  --input /alerts/normalized/alerts.parquet \
+  --output /processed/summaries
+```
+
+Cuando las alertas están en el volumen Docker `alert-data`, el comando anterior
+no debe ejecutarse directamente en el host: `/alerts` solo existe dentro de los
+contenedores. Ejecútalo con Compose:
+
+```bash
+docker compose --profile etl run --rm summaries
+```
+
+El servicio monta `alert-data` como solo lectura y persiste los resultados en el
+volumen `processed-data`. Para consultar o copiar los resultados desde el host:
+
+```bash
+docker volume inspect agent_iot_processed-data
+docker run --rm -v agent_iot_processed-data:/processed alpine \
+  find /processed/summaries -type f -print
+```
+
+La salida contiene un Parquet por tipo en `runs/`, `clients/`, `ips/`, `topics/`
+y `temporal/`, además de `checkpoint.json`. Las ventanas generales son de un
+minuto y los timestamps se conservan en UTC con precisión de microsegundos. Las
+distribuciones y frecuencias se almacenan como JSON dentro de cada fila resumen.
+El proceso deduplica por `alert_id`, publica cada archivo mediante reemplazo
+atómico y registra la huella SHA-256 del archivo de entrada; por tanto, repetir
+la ejecución sobre el mismo Parquet no suma resultados ni duplica alertas.
