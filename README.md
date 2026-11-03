@@ -117,3 +117,20 @@ More detail: [simulation](simulation/README.md),
 
 Las alertas se publican en MQTT y también se persisten en el volumen `alert-data`
 del agente, en `/alerts/YYYY-MM-DD.jsonl` (fecha UTC, una alerta JSON por línea).
+
+## Normalización de alertas
+
+Las alertas persistidas pueden validarse y normalizarse a Parquet sin afectar al
+agente online:
+
+```bash
+python -m infrastructure.alert_processing \
+  --input /alerts \
+  --output /alerts/normalized
+```
+
+El pipeline conserva los registros válidos en `alerts.parquet`, registra líneas
+JSON inválidas o registros con errores en `processing_errors.jsonl` y conserva
+los duplicados detectados en `duplicates.jsonl`. Los valores ausentes permanecen
+como `null`; no se descarta una alerta solo por compartir cliente, IP o tópico.
+La salida requiere `pyarrow`, incluido en `requirements.txt`.
