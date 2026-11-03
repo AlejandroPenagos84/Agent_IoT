@@ -27,7 +27,8 @@ simulation → Mosquitto → infrastructure.tshark.stream_features → JSONL
                                                            ↓
                                              Agent → Classifier
                                                            ↓
-                                             AlertSink → MQTT
+                              CompositeAlertSink → MQTT
+                                               ↘ JSONL diario
 ```
 
 Sidecar deployment in Compose:
@@ -44,6 +45,7 @@ flowchart LR
     usecase --> classifier[Classifier adapter]
     classifier --> sink[MqttAlertSink]
     sink -->|alertas/deteccion| broker
+    sink -->|YYYY-MM-DD.jsonl| alerts[(alert-data volume)]
 ```
 
 In Compose, `infrastructure.tshark.stream_features` runs in the `capture`
@@ -112,3 +114,6 @@ dedicated CLI yet.
 More detail: [simulation](simulation/README.md),
 [classifiers](infrastructure/classifiers/README.md),
 [sinks](infrastructure/sinks/README.md), and [broker](mosquitto/README.md).
+
+Las alertas se publican en MQTT y también se persisten en el volumen `alert-data`
+del agente, en `/alerts/YYYY-MM-DD.jsonl` (fecha UTC, una alerta JSON por línea).

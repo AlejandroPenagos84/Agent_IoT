@@ -98,6 +98,7 @@ services:
             broker_host='mosquitto',
             username='agente',
             alert_topic='alertas/deteccion',
+            alert_dir='/alerts',
             model='${MODELO:-lstm}',
         )).run()
     depends_on:
@@ -105,6 +106,7 @@ services:
         condition: service_healthy
     volumes:
       - capture-data:/capture:ro
+      - alert-data:/alerts
       - ./modelos_agente:/app/modelos_agente:ro,z
     restart: unless-stopped
 
@@ -130,3 +132,4 @@ services:
 volumes:
   mosquitto-log:
   capture-data:
+  alert-data:

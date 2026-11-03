@@ -4,8 +4,12 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from application import Agent
-from infrastructure.classifiers import HybridClassifier, AnomalyClassifier, XgbClassifier
-from infrastructure.sinks import MqttAlertSink
+from infrastructure.classifiers import AnomalyClassifier, HybridClassifier, XgbClassifier
+from infrastructure.sinks import (
+    CompositeAlertSink,
+    DailyFileAlertSink,
+    MqttAlertSink,
+)
 from infrastructure.tshark.tshark_feature_source import TsharkFeatureSource
 
 BINARY_LABELS = {'normal', 'ataque'}
@@ -26,6 +30,7 @@ class AgentConfig:
     normal_labels: Sequence[str] = ('normal',)
     alert_port: int = 1883
     alert_topic: str = 'alertas/deteccion'
+    alert_dir: str = '/alerts'
     model: str = 'hybrid'
 
 
@@ -56,9 +61,12 @@ def build_agent(cfg: AgentConfig) -> Agent:
                                    from_start=cfg.capture_from_start,
                                    poll=cfg.capture_poll),
         classifier=classifier,
-        sink=MqttAlertSink(cfg.broker_host, port=cfg.alert_port,
-                           topic=cfg.alert_topic, username=cfg.username,
-                           password=cfg.password),
+        sink=CompositeAlertSink((
+            MqttAlertSink(cfg.broker_host, port=cfg.alert_port,
+                          topic=cfg.alert_topic, username=cfg.username,
+                          password=cfg.password),
+            DailyFileAlertSink(cfg.alert_dir),
+        )),
         window_size=cfg.window_size,
         normal_labels=cfg.normal_labels,
         source_name='tshark',

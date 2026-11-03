@@ -41,8 +41,22 @@ Todos serializan `domain.model.Alert.to_dict()`:
 - `emit(alert)`: anexa una línea **JSON Lines** por alerta.
 - `flush=True` fuerza el volcado a disco tras cada escritura (útil para ver en vivo).
 
+## `daily_file_alert.py` — `DailyFileAlertSink`
+
+`DailyFileAlertSink(directory, flush=True)`
+
+- Crea el directorio destino si no existe.
+- Anexa cada alerta a `<directory>/YYYY-MM-DD.jsonl`, usando la fecha UTC de
+  `alert.ts`.
+- Conserva exactamente el mismo esquema JSON que MQTT, una alerta por línea.
+
+## `composite_alert.py` — `CompositeAlertSink`
+
+`CompositeAlertSink(sinks)` entrega cada alerta a todos los sinks configurados.
+La composición por defecto publica en MQTT y persiste simultáneamente en los
+archivos JSONL diarios.
+
 ## `__init__.py`
 
-Reexporta `FileAlertSink` y `MqttAlertSink`. El `composition_root` inyecta
-`MqttAlertSink`; `FileAlertSink` se puede añadir a mano (no hay `CompositeAlertSink` en
-el refactor actual).
+Reexporta los sinks disponibles. `composition_root` inyecta un
+`CompositeAlertSink` con MQTT y `DailyFileAlertSink`.
