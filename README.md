@@ -78,8 +78,23 @@ exported models.
 docker compose up --build  # or: podman-compose up --build
 ```
 
-Compose starts certificate generation, Mosquitto, capture, the agent, and the
-simulator. Set `ATAQUE` to select the simulator scenario (default: `dos`).
+Compose starts certificate generation, Mosquitto, Ollama, the Qwen model
+initializer, capture, the agent, and the simulator. The default Ollama model is
+`qwen2.5:3b`; it is downloaded only on the first startup and kept in the
+persistent `ollama-data` volume. Set `OLLAMA_MODEL` to use another Ollama model and `OLLAMA_PORT` to change the host
+port:
+
+```bash
+OLLAMA_MODEL=qwen2.5:3b docker compose up --build
+curl http://localhost:11435/api/tags
+```
+
+The Ollama API is available to project containers at
+`http://ollama:11434` (and from the host at `http://localhost:11435`). The
+agent receives these values as `OLLAMA_BASE_URL` and `OLLAMA_MODEL` for future
+LLM-powered adapters; the existing network classifier remains unchanged.
+
+Set `ATAQUE` to select the simulator scenario (default: `dos`).
 El modo `todos` recorre los tres escenarios en orden, con ráfagas y ritmos
 configurables en tiempo real. `mitm` es sintético y `intrusion` es un intento
 anónimo, no ataques confirmados; ver [simulation/README.md](simulation/README.md).

@@ -59,6 +59,41 @@ services:
       retries: 5
     restart: unless-stopped
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "${OLLAMA_PORT:-11435}:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: ollama-init
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        until ollama list >/dev/null 2>&1; do
+          sleep 2
+        done
+        ollama pull "$$OLLAMA_MODEL"
+        echo "Modelo Ollama disponible: $$OLLAMA_MODEL"
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+
   capture:
     build:
       context: .
@@ -104,6 +139,11 @@ services:
     depends_on:
       mosquitto:
         condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
     volumes:
       - capture-data:/capture:ro
       - alert-data:/alerts
@@ -151,3 +191,4 @@ volumes:
   capture-data:
   alert-data:
   processed-data:
+  ollama-data:
