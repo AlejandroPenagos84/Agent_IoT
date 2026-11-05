@@ -186,6 +186,46 @@ services:
     profiles:
       - etl
 
+  normalize:
+    <<: *app
+    container_name: normalize
+    command:
+      - -m
+      - infrastructure.alert_processing
+      - --input
+      - /alerts
+      - --output
+      - /alerts/normalized
+    volumes:
+      - alert-data:/alerts
+    profiles:
+      - etl
+
+  report:
+    <<: *app
+    container_name: report
+    command:
+      - -m
+      - infrastructure.alert_processing.report
+      - --input
+      - /processed/summaries
+      - --output
+      - /processed/report.json
+      - --natural-output
+      - /processed/report.md
+      - --ollama-timeout
+      - ${OLLAMA_TIMEOUT:-1200}
+    volumes:
+      - processed-data:/processed
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+    depends_on:
+      ollama-init:
+        condition: service_completed_successfully
+    profiles:
+      - etl
+
 volumes:
   mosquitto-log:
   capture-data:

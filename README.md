@@ -184,3 +184,82 @@ distribuciones y frecuencias se almacenan como JSON dentro de cada fila resumen.
 El proceso deduplica por `alert_id`, publica cada archivo mediante reemplazo
 atómico y registra la huella SHA-256 del archivo de entrada; por tanto, repetir
 la ejecución sobre el mismo Parquet no suma resultados ni duplica alertas.
+
+## Reporte JSON y reporte natural de las últimas 24 horas
+
+### Ejecución completa
+
+Para construir y probar todo el flujo con una sola orden:
+
+```bash
+chmod +x generar_reporte.sh
+./generar_reporte.sh
+```
+
+El script construye las imágenes, levanta Mosquitto/Ollama/captura/agente,
+espera a que termine el simulador, normaliza las alertas, crea los resúmenes,
+genera `report.json` y solicita a Ollama el reporte en español. Al finalizar
+imprime el contenido de `report.md`.
+La generación de texto tiene un máximo predeterminado de 20 minutos; puedes
+cambiarlo con `OLLAMA_TIMEOUT=600 ./generar_reporte.sh`.
+
+Los archivos quedan persistidos en el volumen `processed-data`. Para volver a
+ver el reporte sin ejecutar todo el flujo:
+
+```bash
+docker compose --profile etl run --rm \
+  --entrypoint sh report -c 'cat /processed/report.md'
+```
+
+Para reunir las perspectivas de clientes, IP, tópicos y comportamiento temporal
+en un único objeto JSON:
+
+```bash
+python -m infrastructure.alert_processing.report \
+  --input /processed/summaries \
+  --output /processed/report.json
+```
+
+Con Ollama disponible, se puede generar además el reporte redactado en español:
+
+```bash
+python -m infrastructure.alert_processing.report \
+  --input /processed/summaries \
+  --output /processed/report.json \
+  --ollama-url http://localhost:11435 \
+  --ollama-model qwen2.5:3b \
+  --natural-output /processed/report.md
+```
+
+En Compose, el servicio configura automáticamente `http://ollama:11434`,
+espera a que el modelo esté descargado y produce ambos archivos con
+`docker compose --profile etl run --rm report`. El JSON completo es la única
+información estadística enviada a Ollama junto con el prompt de análisis; el
+reporte Markdown se guarda en `processed-data`. El prompt y el mensaje de
+sistema exigen que la respuesta sea exclusivamente en español; los nombres de
+campos JSON no se muestran como idioma del reporte.
+El documento contiene estadísticas generales, los 10 principales clientes/IPs/
+tópicos y los intervalos temporales con mayor actividad. El reloj de referencia
+es UTC y el rango es `[ahora - 24 horas, ahora]`.
+
+Si el Parquet contiene una ejecución histórica, el comando no la interpreta
+como actividad reciente. En ese caso se puede generar un reporte histórico
+indicando una referencia UTC dentro del periodo disponible:
+
+```bash
+docker compose --profile etl run --rm --entrypoint python report \
+  -m infrastructure.alert_processing.report \
+  --input /processed/summaries \
+  --output /processed/report.json \
+  --natural-output /processed/report.md \
+  --now 2026-11-03T20:44:16Z \
+  --ollama-timeout 600
+```
+
+Para un reporte de las últimas 24 horas reales, primero deben persistirse
+alertas recientes y luego regenerarse los resúmenes:
+
+```bash
+docker compose --profile etl run --rm summaries
+docker compose --profile etl run --rm report
+```

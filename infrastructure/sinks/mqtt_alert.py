@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from application.ports.ports_out import AlertSink
-from domain.model import Alert
+from domain.model import Alertz
 from mqtt_utils import make_client
 
 
