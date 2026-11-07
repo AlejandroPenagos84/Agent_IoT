@@ -3,52 +3,46 @@
 from __future__ import annotations
 
 import json
+import sys
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from typing import Any
 
-REPORT_PROMPT = """Eres un analista especializado en seguridad de redes IoT y comunicaciones MQTT.
+REPORT_PROMPT = """Actúa como analista de seguridad IoT y MQTT, especializado
+en interpretar estadísticas de tráfico y alertas.
 
-Tu tarea es analizar las estadísticas proporcionadas y generar un reporte periódico de actividad.
+Analiza el JSON y redacta un informe claro y suficientemente detallado en
+español que explique qué ocurrió durante el periodo, qué comportamientos
+destacan y qué situaciones requieren atención.
 
-El reporte debe incluir:
+No describas la estructura del JSON ni enumeres sus campos. Relaciona las
+estadísticas para identificar concentraciones de actividad, comportamientos
+recurrentes y posibles anomalías. Explica la importancia de los patrones
+encontrados, no solo sus valores.
 
-1. Resumen general de la actividad.
-2. Clientes con mayor cantidad de alertas.
-3. Direcciones IP y tópicos con mayor actividad.
-4. Patrones temporales relevantes.
-5. Hallazgos y posibles comportamientos anómalos.
-6. Conclusiones y recomendaciones.
+Distingue los hechos observados de las posibles interpretaciones. No inventes
+eventos, causas ni conclusiones. Una cantidad elevada de alertas no confirma por
+sí sola un ataque.
 
-Reglas:
-- Utiliza exclusivamente la información proporcionada.
-- No inventes estadísticas ni eventos.
-- Diferencia los hechos observados de las posibles interpretaciones.
-- No afirmes que existe un ataque confirmado únicamente por una cantidad elevada de alertas.
-- Si los datos son insuficientes, indícalo.
-- Evita repetir estadísticas innecesariamente.
+Utiliza lenguaje natural, profesional y directo. Prefiere párrafos cortos y
+conserva los identificadores técnicos relevantes. Incluye, cuando sean
+significativos, los nombres de los tópicos, las IP, los clientes, los tipos de
+alerta y las ventanas temporales concretas. Explica por qué esos elementos son
+relevantes, sin convertir el informe en un inventario. Evita repetir cifras o
+incluir información irrelevante.
 
-Redacta todo el reporte exclusivamente en español. No uses inglés, aunque los
-nombres de campos del JSON estén en inglés. Traduce los títulos, explicaciones,
-hallazgos, conclusiones y recomendaciones. Si incluyes nombres técnicos,
-conserva únicamente los identificadores, direcciones IP, tópicos y valores
-originales necesarios.
+Organiza el informe con hasta tres encabezados, según la información disponible:
 
-La respuesta DEBE comenzar exactamente con:
-## Resumen general
+## Resumen
+## Hallazgos
+## Recomendaciones
 
-Usa exactamente estos encabezados, en este orden:
-## Resumen general
-## Clientes con más alertas
-## IP y tópicos con mayor actividad
-## Patrones temporales
-## Hallazgos y posibles anomalías
-## Conclusiones y recomendaciones
+Escribe únicamente el informe final, exclusivamente en español. Desarrolla las
+tres secciones con la información disponible y termina siempre la sección de
+recomendaciones con frases completas. No interrumpas el informe, no lo dejes
+inconcluso y no termines a mitad de una frase.
 
-Escribe las explicaciones, títulos y viñetas en español. No escribas frases
-como "Based on", "Summary", "Client", "Alert Count" o "If you need".
-
-Estadísticas en JSON:
+DATOS DE ENTRADA (no los repitas en la respuesta):
 """
 
 
@@ -59,51 +53,92 @@ def generate_report(
     model: str,
     timeout: float = 120.0,
 ) -> str:
-    """Ask Ollama to turn a JSON report into a Spanish natural-language report."""
+    """Ask Ollama to turn a JSON report into a natural-language report."""
     if not base_url.strip():
         raise ValueError("Ollama base URL cannot be empty")
     if not model.strip():
         raise ValueError("Ollama model cannot be empty")
 
-    payload = {
-        "model": model,
-        "messages": [
+    system = (
+        "Redactas informes ejecutivos de seguridad. Responde exclusivamente en "
+        "español. Interpreta los datos y escribe un informe completo y "
+        "moderadamente detallado. Nunca "
+        "devuelvas JSON, código, bloques ``` ni una copia de los datos de "
+        "entrada; devuelve únicamente prosa y encabezados Markdown."
+    )
+    user_prompt = (
+        REPORT_PROMPT
+        + "\n--- INICIO DE DATOS ---\n"
+        + json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True)
+        + "\n--- FIN DE DATOS ---\n\n"
+        + "Ahora redacta el informe final. No repitas los datos de entrada."
+    )
+
+    def request_chat(user_content: str) -> str:
+        payload = {
+            "model": model,
+            "messages": [
             {
                 "role": "system",
-                "content": (
-                    "Responde exclusivamente en español. No escribas ninguna "
-                    "sección ni frase en inglés. Usa Markdown con los seis "
-                    "encabezados españoles indicados por el usuario y comienza "
-                    "exactamente con '## Resumen general'."
-                ),
+                "content": system,
             },
             {
                 "role": "user",
-                "content": REPORT_PROMPT
-                + "\n"
-                + json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True),
+                "content": user_content,
             },
-        ],
-        "stream": False,
-        "options": {"temperature": 0},
-    }
-    request = Request(
-        f"{base_url.rstrip('/')}/api/chat",
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urlopen(request, timeout=timeout) as response:
-            result = json.load(response)
-    except HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Ollama returned HTTP {exc.code}: {body}") from exc
-    except URLError as exc:
-        raise RuntimeError(f"Could not connect to Ollama: {exc.reason}") from exc
+            ],
+            "stream": True,
+            "options": {
+                "temperature": 0.2,
+                "num_predict": 1200,
+            },
+        }
+        request = Request(
+            f"{base_url.rstrip('/')}/api/chat",
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=timeout) as response:
+                parts: list[str] = []
+                for raw_line in response:
+                    line = raw_line.decode("utf-8").strip()
+                    if not line:
+                        continue
+                    result = json.loads(line)
+                    message = result.get("message")
+                    text = message.get("content") if isinstance(message, dict) else None
+                    if isinstance(text, str):
+                        parts.append(text)
+                        print(text, end="", flush=True)
+                print(file=sys.stdout)
+        except HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"Ollama returned HTTP {exc.code}: {body}") from exc
+        except URLError as exc:
+            raise RuntimeError(f"Could not connect to Ollama: {exc.reason}") from exc
 
-    message = result.get("message") if isinstance(result, dict) else None
-    text = message.get("content") if isinstance(message, dict) else None
-    if not isinstance(text, str) or not text.strip():
-        raise RuntimeError("Ollama response did not contain a non-empty 'response'")
-    return text.strip()
+        text = "".join(parts)
+        if not text.strip():
+            raise RuntimeError("Ollama response did not contain a non-empty 'content'")
+        text = text.strip()
+        if _looks_like_json(text):
+            raise RuntimeError(
+                "Ollama returned the input data instead of a natural-language report"
+            )
+        return text
+
+    return request_chat(user_prompt)
+
+
+def _looks_like_json(text: str) -> bool:
+    """Detect JSON or a fenced JSON response instead of prose."""
+    candidate = text.strip()
+    if candidate.startswith("```json") and candidate.endswith("```"):
+        return True
+    try:
+        parsed = json.loads(candidate)
+    except json.JSONDecodeError:
+        return False
+    return isinstance(parsed, (dict, list))

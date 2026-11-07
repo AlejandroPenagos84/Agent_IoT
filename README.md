@@ -78,14 +78,14 @@ exported models.
 docker compose up --build  # or: podman-compose up --build
 ```
 
-Compose starts certificate generation, Mosquitto, Ollama, the Qwen model
+Compose starts certificate generation, Mosquitto, Ollama, the Gemma model
 initializer, capture, the agent, and the simulator. The default Ollama model is
-`qwen2.5:3b`; it is downloaded only on the first startup and kept in the
+`gemma3:4b`; it is downloaded only on the first startup and kept in the
 persistent `ollama-data` volume. Set `OLLAMA_MODEL` to use another Ollama model and `OLLAMA_PORT` to change the host
 port:
 
 ```bash
-OLLAMA_MODEL=qwen2.5:3b docker compose up --build
+OLLAMA_MODEL=gemma3:4b docker compose up --build
 curl http://localhost:11435/api/tags
 ```
 
@@ -132,6 +132,8 @@ More detail: [simulation](simulation/README.md),
 
 Las alertas se publican en MQTT y también se persisten en el volumen `alert-data`
 del agente, en `/alerts/YYYY-MM-DD.jsonl` (fecha UTC, una alerta JSON por línea).
+El agente no depende de Ollama y puede detectar y guardar alertas aunque Ollama
+esté detenido; Ollama solo se usa cuando se solicita el reporte natural.
 
 ## Normalización de alertas
 
@@ -185,6 +187,17 @@ El proceso deduplica por `alert_id`, publica cada archivo mediante reemplazo
 atómico y registra la huella SHA-256 del archivo de entrada; por tanto, repetir
 la ejecución sobre el mismo Parquet no suma resultados ni duplica alertas.
 
+Al levantar Compose, el servicio `etl` ejecuta normalización y resúmenes cada
+5 minutos sin llamar a Ollama. El intervalo se puede cambiar, por ejemplo:
+
+```bash
+ETL_INTERVAL_SECONDS=60 docker compose up --build -d
+```
+
+La primera ejecución espera hasta que exista al menos un JSONL no vacío. Las
+alertas JSONL se escriben en tiempo real por el agente; el ETL actualiza los
+Parquet periódicamente. El valor recomendado es 300 segundos.
+
 ## Reporte JSON y reporte natural de las últimas 24 horas
 
 ### Ejecución completa
@@ -198,7 +211,7 @@ chmod +x generar_reporte.sh
 
 El script construye las imágenes, levanta Mosquitto/Ollama/captura/agente,
 espera a que termine el simulador, normaliza las alertas, crea los resúmenes,
-genera `report.json` y solicita a Ollama el reporte en español. Al finalizar
+genera `report.json` y solicita a Ollama el reporte natural. Al finalizar
 imprime el contenido de `report.md`.
 La generación de texto tiene un máximo predeterminado de 20 minutos; puedes
 cambiarlo con `OLLAMA_TIMEOUT=600 ./generar_reporte.sh`.
@@ -212,7 +225,7 @@ docker compose --profile etl run --rm \
 ```
 
 Para reunir las perspectivas de clientes, IP, tópicos y comportamiento temporal
-en un único objeto JSON:
+en un único objeto JSON, sin llamar a Ollama:
 
 ```bash
 python -m infrastructure.alert_processing.report \
@@ -220,27 +233,38 @@ python -m infrastructure.alert_processing.report \
   --output /processed/report.json
 ```
 
-Con Ollama disponible, se puede generar además el reporte redactado en español:
+El reporte natural es una segunda etapa independiente. Lee el JSON ya generado,
+lo envía a Ollama y guarda la respuesta en Markdown:
 
 ```bash
-python -m infrastructure.alert_processing.report \
-  --input /processed/summaries \
-  --output /processed/report.json \
+python -m infrastructure.alert_processing.natural_report \
+  --input /processed/report.json \
+  --output /processed/report.md \
   --ollama-url http://localhost:11435 \
-  --ollama-model qwen2.5:3b \
-  --natural-output /processed/report.md
+  --ollama-model gemma3:4b
 ```
 
-En Compose, el servicio configura automáticamente `http://ollama:11434`,
-espera a que el modelo esté descargado y produce ambos archivos con
-`docker compose --profile etl run --rm report`. El JSON completo es la única
-información estadística enviada a Ollama junto con el prompt de análisis; el
-reporte Markdown se guarda en `processed-data`. El prompt y el mensaje de
-sistema exigen que la respuesta sea exclusivamente en español; los nombres de
-campos JSON no se muestran como idioma del reporte.
+En Compose, `report` solo genera `report.json` y no depende de Ollama:
+
+```bash
+docker compose --profile etl run --rm report
+```
+
+Para ejecutar la etapa lenta de Ollama:
+
+```bash
+docker compose --profile etl run --rm natural-report
+```
+
+El JSON completo es la única información estadística enviada a Ollama junto con
+el prompt de análisis; la respuesta del modelo se guarda como Markdown.
 El documento contiene estadísticas generales, los 10 principales clientes/IPs/
 tópicos y los intervalos temporales con mayor actividad. El reloj de referencia
-es UTC y el rango es `[ahora - 24 horas, ahora]`.
+es UTC y el rango normal es `[ahora - 24 horas, ahora]`. Si no hay solapamiento
+con la ventana actual pero sí existen resúmenes históricos, se genera el reporte
+usando el periodo disponible más reciente y se marca
+`period.historical_fallback=true`. Así se pueden reportar, por ejemplo, cinco
+horas históricas aunque no constituyan 24 horas completas.
 
 Si el Parquet contiene una ejecución histórica, el comando no la interpreta
 como actividad reciente. En ese caso se puede generar un reporte histórico
@@ -251,13 +275,19 @@ docker compose --profile etl run --rm --entrypoint python report \
   -m infrastructure.alert_processing.report \
   --input /processed/summaries \
   --output /processed/report.json \
-  --natural-output /processed/report.md \
   --now 2026-11-03T20:44:16Z \
+```
+
+Después, si también se necesita el análisis narrativo:
+
+```bash
+docker compose --profile etl run --rm natural-report \
   --ollama-timeout 600
 ```
 
 Para un reporte de las últimas 24 horas reales, primero deben persistirse
-alertas recientes y luego regenerarse los resúmenes:
+alertas recientes y dejar que el ETL actualice los resúmenes (o regenerarlos
+manualmente):
 
 ```bash
 docker compose --profile etl run --rm summaries

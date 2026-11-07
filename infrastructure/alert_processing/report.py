@@ -4,15 +4,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
-
-from .ollama import generate_report
 
 SUMMARY_TYPES = ("clients", "ips", "topics", "temporal")
 
@@ -61,6 +58,24 @@ def _sum_counts(values: pd.Series) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def _meaningful_alert_types(counts: dict[str, int], total: int) -> dict[str, int] | None:
+    """Hide the invariant generic attack label from the model input."""
+    if counts == {"ataque": total}:
+        return None
+    return counts
+
+
+def _union_json_arrays(frame: pd.DataFrame, column: str) -> list[str]:
+    values: set[str] = set()
+    if column not in frame:
+        return []
+    for value in frame[column].dropna():
+        parsed = json.loads(value) if isinstance(value, str) else value
+        if isinstance(parsed, list):
+            values.update(str(item) for item in parsed)
+    return sorted(values)
+
+
 def _iso(value: pd.Timestamp) -> str:
     return value.isoformat().replace("+00:00", "Z")
 
@@ -72,6 +87,8 @@ def _write_text_atomic(path: Path, content: str) -> None:
 
 
 def _entity_rows(frame: pd.DataFrame, entity_column: str) -> list[dict[str, Any]]:
+    if frame.empty:
+        return []
     rows = []
     for _, row in frame.sort_values("alert_count", ascending=False).head(10).iterrows():
         item: dict[str, Any] = {
@@ -93,6 +110,34 @@ def _entity_rows(frame: pd.DataFrame, entity_column: str) -> list[dict[str, Any]
     return rows
 
 
+def _activity_summary(temporal_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if not temporal_rows:
+        return {
+            "active_window_count": 0,
+            "active_minutes": 0,
+            "peak_alert_count": 0,
+            "peak_concentration_percentage": 0.0,
+            "bursty_window_count": 0,
+            "hourly_alert_count": {},
+        }
+    counts = [item["alert_count"] for item in temporal_rows]
+    total = sum(counts)
+    peak = max(counts)
+    hourly: Counter[str] = Counter()
+    for item in temporal_rows:
+        hour = item["window_start"][:13] + ":00:00Z"
+        hourly[hour] += item["alert_count"]
+    burst_threshold = max(3, peak * 0.5)
+    return {
+        "active_window_count": len(temporal_rows),
+        "active_minutes": len(temporal_rows),
+        "peak_alert_count": peak,
+        "peak_concentration_percentage": round(peak / total * 100, 2),
+        "bursty_window_count": sum(count >= burst_threshold for count in counts),
+        "hourly_alert_count": dict(sorted(hourly.items())),
+    }
+
+
 def build_last_24h_report(
     summaries_dir: str | Path,
     *,
@@ -107,42 +152,65 @@ def build_last_24h_report(
     root = Path(summaries_dir)
     end = _timestamp(now or datetime.now(timezone.utc))
     start = end - pd.Timedelta(hours=24)
+    run_path = root / "runs" / "summary.parquet"
+    runs_all = _read_summary(root, "runs") if run_path.is_file() else pd.DataFrame()
+    requested_start, requested_end = start, end
+    if not runs_all.empty:
+        available_start = min(_timestamp(value) for value in runs_all["period_start"])
+        available_end = max(_timestamp(value) for value in runs_all["period_end"])
+        if available_end < start or available_start > end:
+            end = available_end
+            start = end - pd.Timedelta(hours=24)
     frames = {
         summary_type: _window(_read_summary(root, summary_type), start, end)
         for summary_type in SUMMARY_TYPES
     }
-    run_path = root / "runs" / "summary.parquet"
     runs = _window(_read_summary(root, "runs"), start, end) if run_path.is_file() else pd.DataFrame()
 
     clients = frames["clients"]
     temporal = frames["temporal"]
     if clients.empty:
-        available = _read_summary(root, "runs")
-        if available.empty:
+        if runs_all.empty:
             raise ValueError("No client alerts found and no run summary is available")
-        available_start = min(_timestamp(value) for value in available["period_start"])
-        available_end = max(_timestamp(value) for value in available["period_end"])
-        if available_end < start or available_start > end:
+        if runs.empty:
             raise ValueError(
                 "No alerts found in the last 24 hours "
-                f"({start.isoformat()} to {end.isoformat()}). "
+                f"({requested_start.isoformat()} to {requested_end.isoformat()}) "
+                "and no usable historical period was found. "
                 f"Available summary data is {available_start.isoformat()} to "
                 f"{available_end.isoformat()} UTC. "
-                "Use --now with a timestamp inside that period for a historical "
-                "report, or regenerate summaries from recent alerts."
+                "Regenerate summaries from recent alerts or use a valid historical "
+                "reference timestamp."
             )
 
     general_source = runs if not runs.empty else clients
     total_alerts = int(general_source["alert_count"].sum())
-    first = min(_timestamp(value) for value in general_source["first_alert_ts"])
-    last = max(_timestamp(value) for value in general_source["last_alert_ts"])
-    alert_types = _sum_counts(general_source["label_counts"])
+    if not temporal.empty:
+        first = min(
+            _timestamp(value)
+            for value in temporal.get("first_alert_ts", temporal["window_start"])
+        )
+        last = max(
+            _timestamp(value)
+            for value in temporal.get("last_alert_ts", temporal["window_end"])
+        )
+        total_alerts = int(temporal["alert_count"].sum())
+        alert_types = _sum_counts(temporal["label_counts"]) \
+            if "label_counts" in temporal else _sum_counts(general_source["label_counts"])
+    else:
+        first = min(_timestamp(value) for value in general_source["first_alert_ts"])
+        last = max(_timestamp(value) for value in general_source["last_alert_ts"])
+        alert_types = _sum_counts(general_source["label_counts"])
     general = {
         "total_alerts": total_alerts,
-        "clients_with_alerts": int(len(clients)),
+        "clients_with_alerts": len(_union_json_arrays(temporal, "client_ids")) \
+            if "client_ids" in temporal else int(len(clients)),
         "first_alert": _iso(first),
         "last_alert": _iso(last),
-        "alert_types": alert_types,
+        "distinct_ips": len(_union_json_arrays(temporal, "ips")) \
+            if "ips" in temporal else int(frames["ips"].shape[0]),
+        "distinct_topics": len(_union_json_arrays(temporal, "topics")) \
+            if "topics" in temporal else int(frames["topics"].shape[0]),
         "analyzed_duration_seconds": min(
             (last - first).total_seconds(), (end - start).total_seconds()
         ),
@@ -152,6 +220,9 @@ def build_last_24h_report(
             else []
         ),
     }
+    meaningful_types = _meaningful_alert_types(alert_types, total_alerts)
+    if meaningful_types is not None:
+        general["alert_types"] = meaningful_types
 
     intervals: dict[str, float | None] = {
         "average_seconds": None,
@@ -170,17 +241,36 @@ def build_last_24h_report(
             for key, value in intervals.items()
         }
 
-    temporal_rows = [
-        {
-            "window_start": _iso(_timestamp(row["window_start"])),
-            "window_end": _iso(_timestamp(row["window_end"])),
-            "alert_count": int(row["alert_count"]),
-        }
-        for _, row in temporal.sort_values("alert_count", ascending=False).iterrows()
-    ]
+    temporal_rows = []
+    if not temporal.empty:
+        temporal_rows = [
+            {
+                "window_start": _iso(_timestamp(row["window_start"])),
+                "window_end": _iso(_timestamp(row["window_end"])),
+                "alert_count": int(row["alert_count"]),
+                "first_alert": _iso(_timestamp(row.get(
+                    "first_alert_ts", row["window_start"]))),
+                "last_alert": _iso(_timestamp(row.get(
+                    "last_alert_ts", row["window_end"]))),
+                "alert_types": _json_counts(row.get("label_counts")),
+                "distinct_clients": int(row.get("distinct_clients", 0)),
+                "distinct_ips": int(row.get("distinct_ips", 0)),
+                "distinct_topics": int(row.get("distinct_topics", 0)),
+            }
+            for _, row in temporal.sort_values(
+                "alert_count", ascending=False
+            ).iterrows()
+        ]
     peak_count = max((item["alert_count"] for item in temporal_rows), default=0)
     return {
-        "period": {"start": _iso(start), "end": _iso(end), "hours": 24},
+        "period": {
+            "start": _iso(start),
+            "end": _iso(end),
+            "hours": 24,
+            "requested_start": _iso(requested_start),
+            "requested_end": _iso(requested_end),
+            "historical_fallback": start != requested_start or end != requested_end,
+        },
         "general": general,
         "clients": {"top_10": _entity_rows(clients, "client_id")},
         "ips": {"top_10": _entity_rows(frames["ips"], "ip")},
@@ -188,6 +278,7 @@ def build_last_24h_report(
         "temporal": {
             "alert_count_by_interval": temporal_rows,
             "consecutive_intervals_seconds": intervals,
+            "activity_profile": _activity_summary(temporal_rows),
             "peak_windows": [
                 item for item in temporal_rows if item["alert_count"] == peak_count
             ],
@@ -196,33 +287,14 @@ def build_last_24h_report(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Build the last-24-hour alert JSON")
+    parser = argparse.ArgumentParser(
+        description="Build the last-24-hour alert JSON without calling Ollama"
+    )
     parser.add_argument("--input", default="/processed/summaries")
     parser.add_argument("--output", default="/processed/report.json")
     parser.add_argument(
         "--now",
         help="UTC reference timestamp in ISO-8601 format (defaults to current time)",
-    )
-    parser.add_argument(
-        "--ollama-url",
-        default=os.getenv("OLLAMA_BASE_URL"),
-        help="Ollama base URL; if omitted, only the JSON report is generated",
-    )
-    parser.add_argument(
-        "--ollama-model",
-        default=os.getenv("OLLAMA_MODEL", "qwen2.5:3b"),
-        help="Ollama model used for the natural-language report",
-    )
-    parser.add_argument(
-        "--natural-output",
-        default="/processed/report.md",
-        help="Path for the natural-language report",
-    )
-    parser.add_argument(
-        "--ollama-timeout",
-        type=float,
-        default=1200.0,
-        help="Ollama request timeout in seconds",
     )
     args = parser.parse_args()
     report = build_last_24h_report(args.input, now=args.now)
@@ -241,18 +313,6 @@ def main() -> None:
         + "\n",
     )
     print(f"Reporte publicado: {output}")
-    if args.ollama_url:
-        natural_output = Path(args.natural_output)
-        natural_output.parent.mkdir(parents=True, exist_ok=True)
-        natural_output.unlink(missing_ok=True)
-        natural_report = generate_report(
-            report,
-            base_url=args.ollama_url,
-            model=args.ollama_model,
-            timeout=args.ollama_timeout,
-        )
-        _write_text_atomic(natural_output, natural_report + "\n")
-        print(f"Reporte natural publicado: {natural_output}")
 
 
 if __name__ == "__main__":

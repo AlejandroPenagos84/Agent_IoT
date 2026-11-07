@@ -30,6 +30,10 @@ def _counts(values: pd.Series) -> str:
     return _json(Counter(str(value) for value in values.dropna()))
 
 
+def _unique_values(values: pd.Series) -> str:
+    return _json(sorted({str(value) for value in values.dropna()}))
+
+
 def _frequency(frame: pd.DataFrame) -> tuple[str, int, str | None]:
     windows = frame["ts"].dt.floor("min").value_counts().sort_index()
     if windows.empty:
@@ -127,12 +131,22 @@ def _temporal_summary(frame: pd.DataFrame, source: str) -> pd.DataFrame:
     windows = ordered.groupby(ordered["ts"].dt.floor("min")).size()
     rows = []
     for window_start, count in windows.items():
+        window_frame = ordered[ordered["ts"].dt.floor("min") == window_start]
         rows.append({
             "period_start": window_start.isoformat(),
             "period_end": (window_start + pd.Timedelta(minutes=1)).isoformat(),
             "window_start": window_start.isoformat(),
             "window_end": (window_start + pd.Timedelta(minutes=1)).isoformat(),
             "alert_count": int(count),
+            "first_alert_ts": window_frame["ts"].min().isoformat(),
+            "last_alert_ts": window_frame["ts"].max().isoformat(),
+            "label_counts": _counts(window_frame["label"]),
+            "distinct_clients": int(window_frame["client_id"].nunique(dropna=True)),
+            "distinct_ips": int(window_frame["ip"].nunique(dropna=True)),
+            "distinct_topics": int(window_frame["topic"].nunique(dropna=True)),
+            "client_ids": _unique_values(window_frame["client_id"]),
+            "ips": _unique_values(window_frame["ip"]),
+            "topics": _unique_values(window_frame["topic"]),
             "source_partition": source,
         })
     result = pd.DataFrame(rows)

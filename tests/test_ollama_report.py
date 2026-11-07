@@ -3,7 +3,10 @@ import unittest
 from unittest.mock import patch
 from urllib.request import Request
 
-from infrastructure.alert_processing.ollama import REPORT_PROMPT, generate_report
+from infrastructure.alert_processing.ollama import (
+    REPORT_PROMPT,
+    generate_report,
+)
 
 
 class OllamaReportTests(unittest.TestCase):
@@ -12,39 +15,47 @@ class OllamaReportTests(unittest.TestCase):
         response = urlopen.return_value.__enter__.return_value
         response.__enter__.return_value = response
         response.__exit__.return_value = None
-        response.read.return_value = json.dumps({
-            "message": {"content": "Reporte listo"}
-        }).encode()
-        response.__iter__.return_value = iter(())
-        with patch(
-            "infrastructure.alert_processing.ollama.json.load",
-            return_value={"message": {"content": "Reporte listo"}},
-        ):
+        ollama_report = "Based on the provided data, activity was observed."
+        response.__iter__.return_value = iter((
+            b'{"message":{"content":"Based on the "}}\n',
+            b'{"message":{"content":"provided data, activity was observed."}}\n',
+            b'{"done":true}\n',
+        ))
+        with patch("builtins.print"):
             result = generate_report(
                 {"general": {"total_alerts": 2}},
                 base_url="http://ollama:11434",
-                model="qwen2.5:3b",
+                model="gemma3:4b",
             )
 
-        self.assertEqual(result, "Reporte listo")
+        self.assertEqual(result, ollama_report)
         request = urlopen.call_args.args[0]
         self.assertIsInstance(request, Request)
         body = json.loads(request.data)
-        self.assertEqual(body["model"], "qwen2.5:3b")
-        self.assertFalse(body["stream"])
-        self.assertEqual(body["options"], {"temperature": 0})
+        self.assertEqual(body["model"], "gemma3:4b")
+        self.assertTrue(body["stream"])
+        self.assertEqual(body["options"], {"temperature": 0.2, "num_predict": 1200})
         self.assertEqual(body["messages"][0]["role"], "system")
         self.assertIn("exclusivamente en español", body["messages"][0]["content"])
-        self.assertIn("## Resumen general", body["messages"][0]["content"])
         self.assertEqual(body["messages"][1]["role"], "user")
         self.assertIn(REPORT_PROMPT, body["messages"][1]["content"])
-        self.assertIn("No uses inglés", body["messages"][1]["content"])
-        self.assertIn("La respuesta DEBE comenzar exactamente", body["messages"][1]["content"])
+        self.assertIn("exclusivamente en español", body["messages"][1]["content"])
         self.assertIn('"total_alerts": 2', body["messages"][1]["content"])
 
     @patch("infrastructure.alert_processing.ollama.urlopen")
     def test_rejects_empty_model_response(self, urlopen):
         response = urlopen.return_value.__enter__.return_value
-        with patch("infrastructure.alert_processing.ollama.json.load", return_value={}):
+        response.__iter__.return_value = iter((b'{"done":true}\n',))
+        with patch("builtins.print"):
             with self.assertRaisesRegex(RuntimeError, "non-empty"):
+                generate_report({}, base_url="http://ollama:11434", model="model")
+
+    @patch("infrastructure.alert_processing.ollama.urlopen")
+    def test_rejects_json_instead_of_natural_report(self, urlopen):
+        response = urlopen.return_value.__enter__.return_value
+        response.__iter__.return_value = iter((
+            b'{"message":{"content":"```json\\n{\\"alerts\\": []}\\n```"}}\n',
+        ))
+        with patch("builtins.print"):
+            with self.assertRaisesRegex(RuntimeError, "input data"):
                 generate_report({}, base_url="http://ollama:11434", model="model")

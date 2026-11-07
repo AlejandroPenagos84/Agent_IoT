@@ -79,7 +79,7 @@ services:
     container_name: ollama-init
     environment:
       OLLAMA_HOST: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma3:4b}
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -139,16 +139,42 @@ services:
     depends_on:
       mosquitto:
         condition: service_healthy
-      ollama-init:
-        condition: service_completed_successfully
-    environment:
-      OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
     volumes:
       - capture-data:/capture:ro
       - alert-data:/alerts
       - processed-data:/processed:ro
       - ./modelos_agente:/app/modelos_agente:ro,z
+    restart: unless-stopped
+
+  etl:
+    <<: *app
+    container_name: etl
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        interval="$${ETL_INTERVAL_SECONDS:-300}"
+        while :; do
+          if find /alerts -maxdepth 1 -type f -name '*.jsonl' -size +0c | grep -q .; then
+            python -m infrastructure.alert_processing \
+              --input /alerts \
+              --output /alerts/normalized
+            python -m infrastructure.alert_processing.summaries \
+              --input /alerts/normalized/alerts.parquet \
+              --output /processed/summaries
+          else
+            echo "ETL: aún no hay alertas JSONL para procesar"
+          fi
+          sleep "$$interval"
+        done
+    environment:
+      ETL_INTERVAL_SECONDS: ${ETL_INTERVAL_SECONDS:-300}
+    volumes:
+      - alert-data:/alerts
+      - processed-data:/processed
+    depends_on:
+      agente:
+        condition: service_started
     restart: unless-stopped
 
   simulador:
@@ -211,15 +237,26 @@ services:
       - /processed/summaries
       - --output
       - /processed/report.json
-      - --natural-output
-      - /processed/report.md
+    volumes:
+      - processed-data:/processed
+    profiles:
+      - etl
+
+  natural-report:
+    <<: *app
+    container_name: natural-report
+    command:
+      - -m
+      - infrastructure.alert_processing.natural_report
+      - --input
+      - /processed/report.json
       - --ollama-timeout
-      - ${OLLAMA_TIMEOUT:-1200}
+      - ${OLLAMA_TIMEOUT:-300}
     volumes:
       - processed-data:/processed
     environment:
       OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma3:4b}
     depends_on:
       ollama-init:
         condition: service_completed_successfully
