@@ -1,13 +1,12 @@
-# `sinks/` — Alert Sinks
+# Alert sinks
 
-Destinos de alertas. Implementan el ABC `AlertSink`
-(`application/ports/ports_out.py`, `emit(alert: Alert) -> None`). Patrón **Strategy**:
-el agente solo conoce la interfaz, así que añadir un sink nuevo (p. ej. un reporte LLM)
-no toca el orquestador.
+Alert sinks implement the `AlertSink` port
+(`application/ports/ports_out.py`). The agent knows only this interface, so a
+new destination can be added without changing the use case.
 
-## Esquema de la alerta
+## Alert schema
 
-Todos serializan `domain.model.Alert.to_dict()`:
+All sinks serialize `domain.model.Alert.to_dict()`:
 
 ```json
 {
@@ -22,41 +21,25 @@ Todos serializan `domain.model.Alert.to_dict()`:
 }
 ```
 
-## `mqtt_alert.py` — `MqttAlertSink`
+## Implementations
 
-`MqttAlertSink(host, port=1883, topic='alertas/deteccion', client_id='agente-alertas', username=None, password=None, tls=None, qos=0, retain=False, keepalive=60)`
+### `MqttAlertSink`
 
-- Crea el cliente con `mqtt_utils.make_client` (paho 1.x/2.x) y lo conecta en el
-  constructor (`loop_start()`).
-- `emit(alert)`: publica el JSON en `topic`; guarda `last_rc` (código de retorno).
-- `close()`: `loop_stop()` + `disconnect()`.
-- El import de `paho` es lazy (dentro de `make_client`). El sink **no** cierra solo al
-  terminar el agente (`Agent.stop()` solo detiene la fuente).
+Publishes JSON alerts to `alertas/deteccion` using Paho MQTT. It connects when
+constructed, stores the last publish return code, and stops its network loop
+when `close()` is called. TLS and credentials are optional.
 
-## `file_alert.py` — `FileAlertSink`
+### `FileAlertSink`
 
-`FileAlertSink(path, flush=True)`
+Appends one JSON object per line to a configured JSONL path and creates its
+parent directory. `flush=True` makes alerts visible immediately.
 
-- Crea el directorio destino si no existe.
-- `emit(alert)`: anexa una línea **JSON Lines** por alerta.
-- `flush=True` fuerza el volcado a disco tras cada escritura (útil para ver en vivo).
+### `DailyFileAlertSink`
 
-## `daily_file_alert.py` — `DailyFileAlertSink`
+Appends to `<directory>/YYYY-MM-DD.jsonl`, using the alert timestamp in UTC.
+The schema is identical to the MQTT alert schema.
 
-`DailyFileAlertSink(directory, flush=True)`
+### `CompositeAlertSink`
 
-- Crea el directorio destino si no existe.
-- Anexa cada alerta a `<directory>/YYYY-MM-DD.jsonl`, usando la fecha UTC de
-  `alert.ts`.
-- Conserva exactamente el mismo esquema JSON que MQTT, una alerta por línea.
-
-## `composite_alert.py` — `CompositeAlertSink`
-
-`CompositeAlertSink(sinks)` entrega cada alerta a todos los sinks configurados.
-La composición por defecto publica en MQTT y persiste simultáneamente en los
-archivos JSONL diarios.
-
-## `__init__.py`
-
-Reexporta los sinks disponibles. `composition_root` inyecta un
-`CompositeAlertSink` con MQTT y `DailyFileAlertSink`.
+Delivers each alert to every configured sink. The default composition publishes
+to MQTT and persists a daily JSONL copy.

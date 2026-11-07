@@ -1,161 +1,400 @@
 # MQTT/IoT intrusion detection
 
-Detects DoS, MitM, and intrusion activity in real MQTT traffic captured with
-tshark. The agent uses a hybrid XGBoost + LSTM model and network/transport
-features only; application payloads are never used for classification.
+This project detects suspicious activity in real MQTT traffic. It combines a
+Mosquitto broker, a traffic simulator, a `tshark` capture sidecar, exported
+machine-learning models, an alert ETL pipeline, and optional natural-language
+reports generated with Ollama.
+
+The project is a laboratory and validation environment. The simulator creates
+traffic patterns that resemble DoS, MitM, and intrusion scenarios; it does not
+perform real-world exploitation or provide attack ground truth. The classifier
+assigns the final `normal` or `ataque` label from captured traffic.
 
 ## Architecture
 
-Ports & Adapters with Dependency Inversion:
+The code follows Ports and Adapters with dependency inversion:
 
-| Layer | Responsibility |
+| Component | Responsibility |
 |---|---|
-| `domain/` | Alerts, frame context, client metadata, and connection events. |
-| `application/ports/` | Driven contracts: `FeatureSource`, `Classifier`, and `AlertSink`; shared `Frame` and `FeatureRow` types. |
-| `application/use_cases/agent.py` | Detection use case: consumes frames, maintains 11-row windows, and emits non-normal labels. |
-| `infrastructure/` | tshark capture, JSONL reading, ML models, and MQTT/file sinks. |
-| `composition_root.py` | Builds and injects concrete adapters through `AgentConfig` and `build_agent`. |
-| `simulation/` | External producer of normal and attack traffic. |
-
-The agent invokes all three driven ports. `Agent.run()` is the entry point to the
-use case. Domain has no infrastructure dependency, and heavy imports are lazy.
+| `domain/` | Alert, frame context, client metadata, and connection models. |
+| `application/ports/` | `FeatureSource`, `Classifier`, and `AlertSink` contracts plus shared types. |
+| `application/use_cases/agent.py` | Maintains 11-frame windows, classifies traffic, and emits non-normal alerts. |
+| `infrastructure/tshark/` | Captures MQTT traffic and converts frames into JSONL features. |
+| `infrastructure/classifiers/` | Loads the exported LSTM, XGBoost, and hybrid models. |
+| `infrastructure/sinks/` | Publishes alerts to MQTT and writes daily JSONL files. |
+| `infrastructure/alert_processing/` | Normalizes alerts, creates summaries, and generates reports. |
+| `simulation/` | Produces normal traffic and controlled laboratory scenarios. |
+| `composition_root.py` | Wires concrete adapters into the application agent. |
 
 ```text
-simulation → Mosquitto → infrastructure.tshark.stream_features → JSONL
-                                                           ↓
-                                              TsharkFeatureSource
-                                                           ↓
-                                             Agent → Classifier
-                                                           ↓
-                              CompositeAlertSink → MQTT
-                                               ↘ JSONL diario
+simulation -> Mosquitto -> tshark capture -> features.jsonl
+                                              |
+                                      TsharkFeatureSource
+                                              |
+                                      Agent -> Classifier
+                                              |
+                              MQTT alert + daily JSONL
+                                              |
+                                  normalize -> summaries
+                                              |
+                                report.json -> Ollama report
 ```
 
-Sidecar deployment in Compose:
+In Compose, the capture container shares Mosquitto's network namespace. It
+writes `/capture/features.jsonl` to the `capture-data` volume. The `agente`
+container tails that file, groups frames by connection and direction, and
+publishes alerts to `alertas/deteccion`. Alerts are also written to
+`/alerts/YYYY-MM-DD.jsonl` using UTC dates.
 
-```mermaid
-flowchart LR
-    sim[simulation container] -->|MQTT publish| broker[Mosquitto container]
-    broker -->|shared network namespace / eth0| cap[capture sidecar]
-    cap -->|runs tshark| stream[infrastructure.tshark.stream_features]
-    stream -->|writes| jsonl[(capture-data volume\nfeatures.jsonl)]
-    jsonl -->|read-only mount| agent[agente container]
-    agent --> source[TsharkFeatureSource]
-    source --> usecase[Agent use case]
-    usecase --> classifier[Classifier adapter]
-    classifier --> sink[MqttAlertSink]
-    sink -->|alertas/deteccion| broker
-    sink -->|YYYY-MM-DD.jsonl| alerts[(alert-data volume)]
-```
+## Requirements
 
-In Compose, `infrastructure.tshark.stream_features` runs in the `capture`
-sidecar. It captures traffic from the broker's shared `eth0` namespace, writes
-`/capture/features.jsonl`, and runs until the sidecar stops. `TsharkFeatureSource`
-tails that file and converts each JSON record into a `Frame`; the agent never
-reads packets directly.
+- Docker Engine with Docker Compose v2, or Podman with `podman-compose`.
+- At least 4 GB of free memory for the containers and the Ollama model.
+- The repository's Python dependencies if running commands outside Docker.
+- `tshark` and capture permissions for a local, non-containerized capture.
 
-Las ventanas se separan por conexión y dirección usando IP/puerto de ambos
-endpoints y `tcp.stream` como contexto, sin cambiar las features ML. La última
-predicción corresponde al frame cuyo contexto se publica en la alerta. Tras
-actualizar este flujo, reconstruir y recrear `capture` y `agente`; los registros
-antiguos sin `ip.dst` se omiten en modo por conexión.
+The main image uses Python 3.11. Dependencies are listed in
+[`requirements.txt`](requirements.txt). Model artifacts are already exported
+under [`modelos_agente/`](modelos_agente/); do not edit them manually.
 
-Docker provides the default wiring, but capture can also run locally with tshark,
-capture privileges, a valid interface, and a path shared with the agent:
+## Quick start with Compose
 
-```bash
-python -m infrastructure.tshark.stream_features \
-  --iface eth0 --filter mqtt --out /tmp/features.jsonl
-```
-
-The capture adapter is deployed with the broker network namespace and
-`NET_RAW`/`NET_ADMIN` capabilities. Classifier adapters prepare features for the
-exported models.
-
-## Running
-
-```bash
-docker compose up --build  # or: podman-compose up --build
-```
-
-Compose starts certificate generation, Mosquitto, Ollama, the Gemma model
-initializer, capture, the agent, and the simulator. The default Ollama model is
-`gemma3:4b`; it is downloaded only on the first startup and kept in the
-persistent `ollama-data` volume. Set `OLLAMA_MODEL` to use another Ollama model and `OLLAMA_PORT` to change the host
-port:
-
-```bash
-OLLAMA_MODEL=gemma3:4b docker compose up --build
-curl http://localhost:11435/api/tags
-```
-
-The Ollama API is available to project containers at
-`http://ollama:11434` (and from the host at `http://localhost:11435`). The
-agent receives these values as `OLLAMA_BASE_URL` and `OLLAMA_MODEL` for future
-LLM-powered adapters; the existing network classifier remains unchanged.
-
-Set `ATAQUE` to select the simulator scenario (default: `dos`).
-El modo `todos` recorre los tres escenarios en orden, con ráfagas y ritmos
-configurables en tiempo real. `mitm` es sintético y `intrusion` es un intento
-anónimo, no ataques confirmados; ver [simulation/README.md](simulation/README.md).
-
-Without a broker:
-
-```bash
-python -m simulation --dry-run --ataque todos --force-attack
-```
-
-For a local run with the requirements installed and a broker available, start the
-capture and agent in separate terminals:
-
-```bash
-python -m infrastructure.tshark.stream_features --iface eth0 --filter mqtt --exclude-topic alertas/deteccion --out /tmp/features.jsonl
-python -c "from composition_root import AgentConfig, build_agent; build_agent(AgentConfig(capture_path='/tmp/features.jsonl', model_dir='modelos_agente', broker_host='localhost')).run()"
-python -m simulation --broker localhost --port 1883 --paquetes 100 --ataque todos
-```
-
-## Models and limitations
-
-`ml-mqtt-model.ipynb` exports `modelos_agente/`; `pipeline_config.json` defines
-the feature order. Do not edit model artifacts manually: changing features
-requires retraining. Network models do not use raw ports as features.
-
-Compose uses plaintext MQTT on port 1883. To capture TLS without decryption, use
-`tcp.port == 8883`; the `mqtt` filter requires visible MQTT protocol fields.
-`client_id` is currently unavailable in captured PUBLISH frames, CONNECT events
-are not integrated, windows are grouped by source port, and the agent has no
-dedicated CLI yet.
-
-More detail: [simulation](simulation/README.md),
-[classifiers](infrastructure/classifiers/README.md),
-[sinks](infrastructure/sinks/README.md), and [broker](mosquitto/README.md).
-
-Las alertas se publican en MQTT y también se persisten en el volumen `alert-data`
-del agente, en `/alerts/YYYY-MM-DD.jsonl` (fecha UTC, una alerta JSON por línea).
-El agente no depende de Ollama y puede detectar y guardar alertas aunque Ollama
-esté detenido; Ollama solo se usa cuando se solicita el reporte natural.
-
-## API REST de reportes naturales
-
-Compose incluye el servicio `report-api`, que deja intactos el agente, el ETL y
-los demás servicios. El endpoint construye el reporte a partir de los resúmenes
-disponibles y devuelve únicamente el texto generado por Ollama:
+From the repository root:
 
 ```bash
 docker compose up --build
-curl -X POST http://localhost:8000/api/v1/reports \
-  -H 'Content-Type: application/json' \
-  -d '{}'
 ```
 
-Respuesta:
+The command starts:
+
+1. `certgen`, which creates the local Mosquitto TLS certificates if needed.
+2. `mosquitto`, listening on MQTT `1883` and MQTTS `8883`.
+3. `ollama` and `ollama-init`, which download the configured model.
+4. `capture`, `agente`, and the default `simulador`.
+5. `etl`, which periodically normalizes alerts and refreshes summaries.
+6. `report-api`, available on host port `8000`.
+
+The default simulation is `dos`. Select another scenario with environment
+variables:
+
+```bash
+ATAQUE=mitm docker compose up --build
+ATAQUE=todos docker compose up --build
+MODELO=hybrid ATAQUE=todos docker compose up --build
+```
+
+Useful lifecycle commands:
+
+```bash
+docker compose ps
+docker compose logs -f agente
+docker compose logs -f etl
+docker compose stop
+docker compose down
+```
+
+`docker compose down` removes containers and networks but keeps named volumes.
+Add `-v` only when you intentionally want to delete captured data, alerts,
+processed reports, and the downloaded Ollama model.
+
+## Mosquitto
+
+The broker configuration is in [`mosquitto/config/mosquitto.conf`](mosquitto/config/mosquitto.conf).
+Port `1883` is plaintext MQTT. Port `8883` uses the self-signed certificate
+generated by `certgen`. The lab broker permits anonymous connections because
+the intrusion scenario requires them; do not expose this configuration to an
+untrusted network.
+
+Inspect broker logs with:
+
+```bash
+docker compose logs -f mosquitto
+docker compose exec mosquitto sh -c 'tail -f /mosquitto/log/mosquitto.log'
+```
+
+The certificates are runtime artifacts under `mosquitto/certs/` and are
+ignored by Git. To force a new local certificate, stop the stack and remove
+only the specific files before starting it again:
+
+```bash
+rm -f mosquitto/certs/server.crt mosquitto/certs/server.key mosquitto/certs/ca.crt
+docker compose up --build
+```
+
+## Simulator
+
+Run the simulator inside Compose or locally against a reachable broker:
+
+```bash
+python -m simulation --broker localhost --port 1883 \
+  --paquetes 500 --ataque todos --verbose
+python -m simulation --dry-run --ataque todos --force-attack
+```
+
+Supported scenarios are `none`, `dos`, `mitm`, `intrusion`, and `todos`.
+`todos` runs `dos`, `mitm`, and `intrusion` in sequence and requires
+`--paquetes >= 3 * --burst-size + 2`. `--paquetes` counts MQTT publications,
+not TCP frames or generated alerts.
+
+Important options include `--burst-size`, `--dos-rate`, `--attack-rate`,
+`--attack-gap`, `--dos-clients`, `--dos-payload-size`, `--seed`, and
+`--discovery-seconds`. MitM scenarios require plaintext MQTT because the
+laboratory proxy cannot modify TLS traffic. See
+[`simulation/README.md`](simulation/README.md) for scenario behavior and all
+options.
+
+## Choosing and running the detector
+
+Compose uses the LSTM model by default:
+
+```yaml
+model: '${MODELO:-lstm}'
+```
+
+Valid values are `lstm`, `hybrid`, and `xgboost`. For example:
+
+```bash
+MODELO=hybrid docker compose up --build
+```
+
+The detector does not require Ollama. It can capture, classify, and persist
+alerts while Ollama is stopped. Ollama is used only for natural-language
+report generation.
+
+For a local run, start a broker, capture, and agent in separate terminals:
+
+```bash
+python -m infrastructure.tshark.stream_features \
+  --iface eth0 --filter mqtt \
+  --exclude-topic alertas/deteccion --out /tmp/features.jsonl
+
+python -c "from composition_root import AgentConfig, build_agent; \
+build_agent(AgentConfig(capture_path='/tmp/features.jsonl', \
+model_dir='modelos_agente', broker_host='localhost')).run()"
+
+python -m simulation --broker localhost --port 1883 \
+  --paquetes 100 --ataque todos
+```
+
+## Ollama
+
+Compose exposes Ollama on host port `11435` by default and containers reach it
+at `http://ollama:11434`. The default model is `gemma3:4b` and is stored in the
+persistent `ollama-data` volume:
+
+```bash
+OLLAMA_MODEL=gemma3:4b docker compose up --build -d
+curl http://localhost:11435/api/tags
+docker compose exec ollama ollama list
+```
+
+Use another model or host port with:
+
+```bash
+OLLAMA_MODEL=llama3.2:3b OLLAMA_PORT=11436 \
+  docker compose up --build -d
+```
+
+The initializer pulls the selected model before `natural-report` and
+`report-api` start. If Ollama cannot be reached, detection continues, while a
+natural-report request fails explicitly.
+
+## ETL and analytical summaries
+
+The `etl` service runs every 300 seconds by default. It does not call Ollama.
+It normalizes JSONL alerts, builds idempotent summaries, and generates
+`/processed/report.json` for downstream services. Change the interval with:
+
+```bash
+ETL_INTERVAL_SECONDS=60 docker compose up --build -d
+```
+
+Report timestamps are written in `America/Bogota` by default (UTC-5). Change
+the output timezone with `REPORT_TIMEZONE`, for example:
+
+```bash
+REPORT_TIMEZONE=America/Bogota docker compose up -d
+```
+
+Run the ETL stages manually:
+
+```bash
+docker compose --profile etl run --rm normalize
+docker compose --profile etl run --rm summaries
+```
+
+The normalized output contains `alerts.parquet`, `processing_errors.jsonl`, and
+`duplicates.jsonl`. Summary Parquet files are written under `runs/`, `clients/`,
+`ips/`, `topics/`, and `temporal/`, together with `checkpoint.json`.
+Summaries are deduplicated by `alert_id` and written atomically, so repeating
+the command does not double-count the same alerts.
+
+The commands above use container paths and should be run through Compose when
+the data is in named volumes. To inspect processed files:
+
+```bash
+docker run --rm -v agent_iot_processed-data:/processed alpine \
+  find /processed -type f -print
+```
+
+The exact volume prefix depends on the Compose project name. The portable
+alternative below uses the volumes already mounted by the project services:
+
+```bash
+# List all files produced by normalization, summaries, and reports
+docker compose --profile etl run --rm --entrypoint sh report \
+  -c 'find /processed -type f -printf "%p (%s bytes)\n" | sort'
+
+# List normalized alert files
+docker compose --profile etl run --rm --entrypoint sh normalize \
+  -c 'find /alerts/normalized -maxdepth 1 -type f -print | sort'
+
+# List every summary partition
+docker compose --profile etl run --rm --entrypoint sh summaries \
+  -c 'find /processed/summaries -type f -print | sort'
+```
+
+The summary files are Parquet files. To inspect their schema and rows, use a
+temporary Python process with the same project image:
+
+```bash
+docker compose --profile etl run --rm --entrypoint python summaries -c '
+import pandas as pd
+from pathlib import Path
+
+root = Path("/processed/summaries")
+for path in sorted(root.glob("*/summary.parquet")):
+    frame = pd.read_parquet(path)
+    print(f"\n== {path} ==")
+    print(f"rows={len(frame)} columns={list(frame.columns)}")
+    print(frame.head(5).to_string(index=False))
+'
+```
+
+The generated files have these purposes:
+
+| Path | Contents |
+|---|---|
+| `/alerts/normalized/alerts.parquet` | Validated and normalized alerts. |
+| `/alerts/normalized/processing_errors.jsonl` | Invalid input lines and validation errors. |
+| `/alerts/normalized/duplicates.jsonl` | Duplicate alerts detected by the pipeline. |
+| `/processed/summaries/runs/summary.parquet` | Overall alert-run statistics. |
+| `/processed/summaries/clients/summary.parquet` | Aggregates by client. |
+| `/processed/summaries/ips/summary.parquet` | Aggregates by source IP. |
+| `/processed/summaries/topics/summary.parquet` | Aggregates by MQTT topic. |
+| `/processed/summaries/temporal/summary.parquet` | One-minute activity windows. |
+| `/processed/summaries/checkpoint.json` | Input fingerprint and summary checkpoint. |
+| `/processed/report.json` | Combined analytical report sent to Ollama. |
+| `/processed/report.md` | Optional natural-language report when `--output` is used. |
+
+To read the final JSON or Markdown report:
+
+```bash
+docker compose --profile etl run --rm --entrypoint sh report \
+  -c 'test -f /processed/report.json && cat /processed/report.json || echo "report.json does not exist yet"'
+
+docker compose --profile etl run --rm --entrypoint sh report \
+  -c 'test -f /processed/report.md && cat /processed/report.md || echo "report.md does not exist yet"'
+```
+
+The `etl` service runs continuously and logs each polling cycle. Follow its
+progress and inspect the generated files repeatedly from separate terminals:
+
+```bash
+docker compose logs -f etl
+watch -n 5 "docker compose --profile etl run --rm --quiet-pull --entrypoint sh report -c 'find /processed -type f -printf \"%p %s bytes\\n\" | sort'"
+```
+
+The automatic ETL updates normalized alerts, summaries, and `report.json`. It
+does not call Ollama. Run the report stage manually only when needed:
+
+```bash
+docker compose --profile etl run --rm report
+docker compose --profile etl run --rm natural-report \
+  --output /processed/report.md
+```
+
+The report services mount `processed-data`, so the files remain available after
+the one-shot containers exit. They are removed only if the named volume is
+deleted, for example with `docker compose down -v`.
+
+## Reports
+
+### Complete manual pipeline
+
+[`generar_reporte.sh`](generar_reporte.sh) runs a complete demonstration:
+
+```bash
+chmod +x generar_reporte.sh
+./generar_reporte.sh
+```
+
+It builds and starts the stack, waits for the simulator, stops capture/agent/
+ETL so files are complete, then runs normalization, summaries, `report.json`,
+and the Ollama stage. The script prints the natural-language report. The
+timeout can be changed with `OLLAMA_TIMEOUT=600`.
+
+The Compose `natural-report` command prints the response unless an output path
+is supplied. To persist it explicitly:
+
+```bash
+docker compose --profile etl run --rm natural-report \
+  --output /processed/report.md
+```
+
+Generate the analytical JSON without Ollama:
+
+```bash
+docker compose --profile etl run --rm report
+```
+
+Generate the Markdown report from the JSON:
+
+```bash
+docker compose --profile etl run --rm natural-report \
+  --output /processed/report.md
+```
+
+For a local installation, the equivalent commands are:
+
+```bash
+python -m infrastructure.alert_processing.report \
+  --input /processed/summaries --output /processed/report.json
+python -m infrastructure.alert_processing.natural_report \
+  --input /processed/report.json --output /processed/report.md \
+  --ollama-url http://localhost:11435 --ollama-model gemma3:4b
+```
+
+Reports use the latest 24-hour UTC window. A historical fallback is selected
+when no summaries overlap the requested window but historical summaries exist.
+To request a historical reference in the Compose report stage:
+
+```bash
+docker compose --profile etl run --rm --entrypoint python report \
+  -m infrastructure.alert_processing.report \
+  --input /processed/summaries --output /processed/report.json \
+  --now 2026-11-03T20:44:16Z
+```
+
+## REST API
+
+The API is served by `report-api` on `http://localhost:8000`. It reads the
+summaries produced by ETL and asks Ollama for the natural-language report:
+
+```bash
+curl http://localhost:8000/health
+curl -X POST http://localhost:8000/api/v1/reports \
+  -H 'Content-Type: application/json' -d '{}'
+```
+
+Response shape:
 
 ```json
-{"report":"## Resumen\n..."}
+{"report":"## Summary\n..."}
 ```
 
-Se puede indicar un modelo o una fecha UTC de referencia para consultar un
-periodo histórico:
+The request body is optional. It can specify a model and a timezone-aware UTC
+reference timestamp:
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/reports \
@@ -163,165 +402,37 @@ curl -X POST http://localhost:8000/api/v1/reports \
   -d '{"model":"gemma3:4b","now":"2026-11-07T12:00:00Z"}'
 ```
 
-`GET /health` devuelve el estado del servicio. El endpoint responde `404` si
-todavía no hay resúmenes disponibles y `502` si Ollama no puede generar el
-reporte.
+The API returns `404` when summaries are unavailable, `400` for an invalid
+timestamp, and `502` when Ollama cannot generate the report.
 
-## Normalización de alertas
+## Models, data, and limitations
 
-Las alertas persistidas pueden validarse y normalizarse a Parquet sin afectar al
-agente online:
+The notebook [`ml-mqtt-model.ipynb`](ml-mqtt-model.ipynb) exports the artifacts
+in [`modelos_agente/`](modelos_agente/). The feature order is defined by
+`pipeline_config.json`; changing features requires retraining and re-exporting.
+The classifiers use network and MQTT metadata, not raw application payloads.
 
-```bash
-python -m infrastructure.alert_processing \
-  --input /alerts \
-  --output /alerts/normalized
-```
+Frames are grouped by `(tcp.stream, ip.src, tcp.srcport, ip.dst, tcp.dstport)`.
+The capture keeps `ip.dst` and `tcp.stream` as context without using them as ML
+features. Older JSONL records without the required endpoint fields are skipped
+in per-flow mode. MQTT `client_id` and the latest topic are correlated by
+`tcp.stream` when CONNECT and PUBLISH frames provide them.
 
-El pipeline conserva los registros válidos en `alerts.parquet`, registra líneas
-JSON inválidas o registros con errores en `processing_errors.jsonl` y conserva
-los duplicados detectados en `duplicates.jsonl`. Los valores ausentes permanecen
-como `null`; no se descarta una alerta solo por compartir cliente, IP o tópico.
-La salida requiere `pyarrow`, incluido en `requirements.txt`.
+TLS traffic on port `8883` can be captured with a filter such as
+`tcp.port == 8883`, but encrypted payloads cannot be decoded by the `mqtt`
+display filter without decryption.
 
-## Resúmenes analíticos
+## Tests
 
-Los agregados se generan desde el Parquet normalizado y no modifican las alertas:
-
-```bash
-python -m infrastructure.alert_processing.summaries \
-  --input /alerts/normalized/alerts.parquet \
-  --output /processed/summaries
-```
-
-Cuando las alertas están en el volumen Docker `alert-data`, el comando anterior
-no debe ejecutarse directamente en el host: `/alerts` solo existe dentro de los
-contenedores. Ejecútalo con Compose:
+Run the complete unit-test suite:
 
 ```bash
-docker compose --profile etl run --rm summaries
+python -m unittest discover -s tests -v
 ```
 
-El servicio monta `alert-data` como solo lectura y persiste los resultados en el
-volumen `processed-data`. Para consultar o copiar los resultados desde el host:
-
-```bash
-docker volume inspect agent_iot_processed-data
-docker run --rm -v agent_iot_processed-data:/processed alpine \
-  find /processed/summaries -type f -print
-```
-
-La salida contiene un Parquet por tipo en `runs/`, `clients/`, `ips/`, `topics/`
-y `temporal/`, además de `checkpoint.json`. Las ventanas generales son de un
-minuto y los timestamps se conservan en UTC con precisión de microsegundos. Las
-distribuciones y frecuencias se almacenan como JSON dentro de cada fila resumen.
-El proceso deduplica por `alert_id`, publica cada archivo mediante reemplazo
-atómico y registra la huella SHA-256 del archivo de entrada; por tanto, repetir
-la ejecución sobre el mismo Parquet no suma resultados ni duplica alertas.
-
-Al levantar Compose, el servicio `etl` ejecuta normalización y resúmenes cada
-5 minutos sin llamar a Ollama. El intervalo se puede cambiar, por ejemplo:
-
-```bash
-ETL_INTERVAL_SECONDS=60 docker compose up --build -d
-```
-
-La primera ejecución espera hasta que exista al menos un JSONL no vacío. Las
-alertas JSONL se escriben en tiempo real por el agente; el ETL actualiza los
-Parquet periódicamente. El valor recomendado es 300 segundos.
-
-## Reporte JSON y reporte natural de las últimas 24 horas
-
-### Ejecución completa
-
-Para construir y probar todo el flujo con una sola orden:
-
-```bash
-chmod +x generar_reporte.sh
-./generar_reporte.sh
-```
-
-El script construye las imágenes, levanta Mosquitto/Ollama/captura/agente,
-espera a que termine el simulador, normaliza las alertas, crea los resúmenes,
-genera `report.json` y solicita a Ollama el reporte natural. Al finalizar
-imprime el contenido de `report.md`.
-La generación de texto tiene un máximo predeterminado de 20 minutos; puedes
-cambiarlo con `OLLAMA_TIMEOUT=600 ./generar_reporte.sh`.
-
-Los archivos quedan persistidos en el volumen `processed-data`. Para volver a
-ver el reporte sin ejecutar todo el flujo:
-
-```bash
-docker compose --profile etl run --rm \
-  --entrypoint sh report -c 'cat /processed/report.md'
-```
-
-Para reunir las perspectivas de clientes, IP, tópicos y comportamiento temporal
-en un único objeto JSON, sin llamar a Ollama:
-
-```bash
-python -m infrastructure.alert_processing.report \
-  --input /processed/summaries \
-  --output /processed/report.json
-```
-
-El reporte natural es una segunda etapa independiente. Lee el JSON ya generado,
-lo envía a Ollama y guarda la respuesta en Markdown:
-
-```bash
-python -m infrastructure.alert_processing.natural_report \
-  --input /processed/report.json \
-  --output /processed/report.md \
-  --ollama-url http://localhost:11435 \
-  --ollama-model gemma3:4b
-```
-
-En Compose, `report` solo genera `report.json` y no depende de Ollama:
-
-```bash
-docker compose --profile etl run --rm report
-```
-
-Para ejecutar la etapa lenta de Ollama:
-
-```bash
-docker compose --profile etl run --rm natural-report
-```
-
-El JSON completo es la única información estadística enviada a Ollama junto con
-el prompt de análisis; la respuesta del modelo se guarda como Markdown.
-El documento contiene estadísticas generales, los 10 principales clientes/IPs/
-tópicos y los intervalos temporales con mayor actividad. El reloj de referencia
-es UTC y el rango normal es `[ahora - 24 horas, ahora]`. Si no hay solapamiento
-con la ventana actual pero sí existen resúmenes históricos, se genera el reporte
-usando el periodo disponible más reciente y se marca
-`period.historical_fallback=true`. Así se pueden reportar, por ejemplo, cinco
-horas históricas aunque no constituyan 24 horas completas.
-
-Si el Parquet contiene una ejecución histórica, el comando no la interpreta
-como actividad reciente. En ese caso se puede generar un reporte histórico
-indicando una referencia UTC dentro del periodo disponible:
-
-```bash
-docker compose --profile etl run --rm --entrypoint python report \
-  -m infrastructure.alert_processing.report \
-  --input /processed/summaries \
-  --output /processed/report.json \
-  --now 2026-11-03T20:44:16Z \
-```
-
-Después, si también se necesita el análisis narrativo:
-
-```bash
-docker compose --profile etl run --rm natural-report \
-  --ollama-timeout 600
-```
-
-Para un reporte de las últimas 24 horas reales, primero deben persistirse
-alertas recientes y dejar que el ETL actualice los resúmenes (o regenerarlos
-manualmente):
-
-```bash
-docker compose --profile etl run --rm summaries
-docker compose --profile etl run --rm report
-```
+Additional component documentation is available in
+[`application/use_cases/README.md`](application/use_cases/README.md),
+[`infrastructure/classifiers/README.md`](infrastructure/classifiers/README.md),
+[`infrastructure/sinks/README.md`](infrastructure/sinks/README.md),
+[`infrastructure/tshark/README.md`](infrastructure/tshark/README.md), and
+[`mosquitto/README.md`](mosquitto/README.md).

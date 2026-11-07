@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -76,8 +78,9 @@ def _union_json_arrays(frame: pd.DataFrame, column: str) -> list[str]:
     return sorted(values)
 
 
-def _iso(value: pd.Timestamp) -> str:
-    return value.isoformat().replace("+00:00", "Z")
+def _iso(value: pd.Timestamp, timezone_name: str = "UTC") -> str:
+    result = value.tz_convert(ZoneInfo(timezone_name)).isoformat()
+    return result.replace("+00:00", "Z") if timezone_name == "UTC" else result
 
 
 def _write_text_atomic(path: Path, content: str) -> None:
@@ -86,7 +89,9 @@ def _write_text_atomic(path: Path, content: str) -> None:
     temporary.replace(path)
 
 
-def _entity_rows(frame: pd.DataFrame, entity_column: str) -> list[dict[str, Any]]:
+def _entity_rows(
+    frame: pd.DataFrame, entity_column: str, timezone_name: str
+) -> list[dict[str, Any]]:
     if frame.empty:
         return []
     rows = []
@@ -95,8 +100,8 @@ def _entity_rows(frame: pd.DataFrame, entity_column: str) -> list[dict[str, Any]
             entity_column: row[entity_column],
             "alert_count": int(row["alert_count"]),
             "alert_types": _json_counts(row["label_counts"]),
-            "first_alert": _iso(_timestamp(row["first_alert_ts"])),
-            "last_alert": _iso(_timestamp(row["last_alert_ts"])),
+            "first_alert": _iso(_timestamp(row["first_alert_ts"]), timezone_name),
+            "last_alert": _iso(_timestamp(row["last_alert_ts"]), timezone_name),
         }
         if entity_column == "client_id":
             item["distinct_topics"] = int(row["distinct_topics"])
@@ -110,7 +115,9 @@ def _entity_rows(frame: pd.DataFrame, entity_column: str) -> list[dict[str, Any]
     return rows
 
 
-def _activity_summary(temporal_rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _activity_summary(
+    temporal_rows: list[dict[str, Any]], timezone_name: str
+) -> dict[str, Any]:
     if not temporal_rows:
         return {
             "active_window_count": 0,
@@ -125,7 +132,7 @@ def _activity_summary(temporal_rows: list[dict[str, Any]]) -> dict[str, Any]:
     peak = max(counts)
     hourly: Counter[str] = Counter()
     for item in temporal_rows:
-        hour = item["window_start"][:13] + ":00:00Z"
+        hour = _iso(_timestamp(item["window_start"]), timezone_name)[:13] + ":00:00"
         hourly[hour] += item["alert_count"]
     burst_threshold = max(3, peak * 0.5)
     return {
@@ -142,6 +149,7 @@ def build_last_24h_report(
     summaries_dir: str | Path,
     *,
     now: datetime | pd.Timestamp | None = None,
+    output_timezone: str = "UTC",
 ) -> dict[str, Any]:
     """Return one JSON-compatible report for the preceding 24 hours.
 
@@ -205,8 +213,8 @@ def build_last_24h_report(
         "total_alerts": total_alerts,
         "clients_with_alerts": len(_union_json_arrays(temporal, "client_ids")) \
             if "client_ids" in temporal else int(len(clients)),
-        "first_alert": _iso(first),
-        "last_alert": _iso(last),
+        "first_alert": _iso(first, output_timezone),
+        "last_alert": _iso(last, output_timezone),
         "distinct_ips": len(_union_json_arrays(temporal, "ips")) \
             if "ips" in temporal else int(frames["ips"].shape[0]),
         "distinct_topics": len(_union_json_arrays(temporal, "topics")) \
@@ -245,13 +253,13 @@ def build_last_24h_report(
     if not temporal.empty:
         temporal_rows = [
             {
-                "window_start": _iso(_timestamp(row["window_start"])),
-                "window_end": _iso(_timestamp(row["window_end"])),
+                "window_start": _iso(_timestamp(row["window_start"]), output_timezone),
+                "window_end": _iso(_timestamp(row["window_end"]), output_timezone),
                 "alert_count": int(row["alert_count"]),
                 "first_alert": _iso(_timestamp(row.get(
-                    "first_alert_ts", row["window_start"]))),
+                    "first_alert_ts", row["window_start"])), output_timezone),
                 "last_alert": _iso(_timestamp(row.get(
-                    "last_alert_ts", row["window_end"]))),
+                    "last_alert_ts", row["window_end"])), output_timezone),
                 "alert_types": _json_counts(row.get("label_counts")),
                 "distinct_clients": int(row.get("distinct_clients", 0)),
                 "distinct_ips": int(row.get("distinct_ips", 0)),
@@ -264,21 +272,21 @@ def build_last_24h_report(
     peak_count = max((item["alert_count"] for item in temporal_rows), default=0)
     return {
         "period": {
-            "start": _iso(start),
-            "end": _iso(end),
+            "start": _iso(start, output_timezone),
+            "end": _iso(end, output_timezone),
             "hours": 24,
-            "requested_start": _iso(requested_start),
-            "requested_end": _iso(requested_end),
+            "requested_start": _iso(requested_start, output_timezone),
+            "requested_end": _iso(requested_end, output_timezone),
             "historical_fallback": start != requested_start or end != requested_end,
         },
         "general": general,
-        "clients": {"top_10": _entity_rows(clients, "client_id")},
-        "ips": {"top_10": _entity_rows(frames["ips"], "ip")},
-        "topics": {"top_10": _entity_rows(frames["topics"], "topic")},
+        "clients": {"top_10": _entity_rows(clients, "client_id", output_timezone)},
+        "ips": {"top_10": _entity_rows(frames["ips"], "ip", output_timezone)},
+        "topics": {"top_10": _entity_rows(frames["topics"], "topic", output_timezone)},
         "temporal": {
             "alert_count_by_interval": temporal_rows,
             "consecutive_intervals_seconds": intervals,
-            "activity_profile": _activity_summary(temporal_rows),
+            "activity_profile": _activity_summary(temporal_rows, output_timezone),
             "peak_windows": [
                 item for item in temporal_rows if item["alert_count"] == peak_count
             ],
@@ -296,8 +304,15 @@ def main() -> None:
         "--now",
         help="UTC reference timestamp in ISO-8601 format (defaults to current time)",
     )
+    parser.add_argument(
+        "--timezone",
+        default=os.getenv("REPORT_TIMEZONE", "America/Bogota"),
+        help="Timezone for timestamps written to the report (default: America/Bogota)",
+    )
     args = parser.parse_args()
-    report = build_last_24h_report(args.input, now=args.now)
+    report = build_last_24h_report(
+        args.input, now=args.now, output_timezone=args.timezone
+    )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     _write_text_atomic(
@@ -305,7 +320,9 @@ def main() -> None:
         json.dumps(
             {
                 **report,
-                "report_generated_at": _iso(pd.Timestamp.now(tz="UTC")),
+                "report_generated_at": _iso(
+                    pd.Timestamp.now(tz="UTC"), args.timezone
+                ),
             },
             indent=2,
             ensure_ascii=False,

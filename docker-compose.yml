@@ -162,6 +162,9 @@ services:
             python -m infrastructure.alert_processing.summaries \
               --input /alerts/normalized/alerts.parquet \
               --output /processed/summaries
+            python -m infrastructure.alert_processing.report \
+              --input /processed/summaries \
+              --output /processed/report.json
           else
             echo "ETL: aún no hay alertas JSONL para procesar"
           fi
@@ -169,6 +172,7 @@ services:
         done
     environment:
       ETL_INTERVAL_SECONDS: ${ETL_INTERVAL_SECONDS:-300}
+      REPORT_TIMEZONE: ${REPORT_TIMEZONE:-America/Bogota}
     volumes:
       - alert-data:/alerts
       - processed-data:/processed

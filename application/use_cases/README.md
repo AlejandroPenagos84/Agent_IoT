@@ -1,18 +1,23 @@
-# Agente
+# Agent use case
 
-`Agent` consume `Frame` por el port `FeatureSource`, mantiene ventanas de 11
-filas y publica la última clasificación distinta de `normal` por `AlertSink`.
-Depende solo de los ports y tipos compartidos.
+`Agent` consumes `Frame` values through the `FeatureSource` port, maintains
+11-row windows, and emits the latest non-`normal` classification through the
+`AlertSink` port. It depends only on application ports and shared types.
 
-Por defecto, los buffers se separan por conexión y dirección:
-`(stream_id, ip, srcport, dst_ip, dstport)`. `stream_id` corresponde a
-`tcp.stream`; evita mezclar conexiones que reutilizan endpoints en una captura.
-No se mezclan respuestas del broker a distintos clientes. Se omiten frames
-sin endpoints completos; `per_flow=False` permite una ventana global.
+By default, buffers are separated by connection and direction using
+`(stream_id, ip, srcport, dst_ip, dstport)`. `stream_id` is `tcp.stream` and
+prevents connections that reuse endpoints in one capture from being mixed.
+Broker responses to different clients are not combined. Set `per_flow=False`
+to use one global window.
 
-Los adaptadores deben devolver su última etiqueta para el último frame de la
-ventana, cuyo contexto se conserva para la alerta. Los LSTM evalúan también la
-última secuencia completa. Una alerta sobre tráfico broker → cliente conserva
-la IP del broker: `ip` identifica el origen del frame, no al atacante.
+Classifiers return one label per evaluable frame. The agent uses the last label,
+which belongs to the newest frame in the window, and preserves that frame's
+context in the alert. LSTM classifiers also evaluate the last complete
+sequence. An alert for broker-to-client traffic keeps the broker's source IP;
+`ip` identifies the frame source, not necessarily an attacker.
 
-Verificación de regresiones: `python -m unittest discover -s tests -v`.
+Run regression tests with:
+
+```bash
+python -m unittest discover -s tests -v
+```

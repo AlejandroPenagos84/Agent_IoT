@@ -1,34 +1,37 @@
-# `mosquitto/` — Broker Configuration
+# Mosquitto broker configuration
 
-Configuración del broker MQTT usado por `docker-compose.yml`. No es código Python.
+This directory contains the broker configuration used by
+[`docker-compose.yml`](../docker-compose.yml). It is configuration, not Python
+application code.
 
 ## `config/mosquitto.conf`
 
-| Directiva | Valor | Por qué |
+| Directive | Value | Purpose |
 |---|---|---|
-| `persistence false` | — | No se guardan sesiones entre reinicios (simulación efímera). |
-| `allow_anonymous true` | — | Permite CONNECT sin credenciales; es lo que usa el ataque `intrusion` del simulador. |
-| `log_dest file /mosquitto/log/mosquitto.log` | — | Log en el volumen compartido (debug). |
-| `log_dest stdout` | — | Log también a la salida del contenedor. |
-| `log_type all` | — | Registra conexiones y publicaciones. |
-| `log_timestamp true` | — | Añade marca temporal a cada línea. |
-| `listener 1883` | claro | Tráfico MQTT sin cifrar. |
-| `listener 8883` | TLS | Tráfico MQTTS (`certfile`/`keyfile`). |
-| `max_queued_messages 0` / `message_size_limit 0` | — | Sin límites (el simulador usa payloads de varios tamaños). |
+| `persistence false` | — | Sessions are not retained between restarts. |
+| `allow_anonymous true` | — | Required by the simulator's intrusion scenario. |
+| `log_dest file` | `/mosquitto/log/mosquitto.log` | Writes a persistent debug log. |
+| `log_dest stdout` | — | Also sends logs to the container output. |
+| `log_type all` | — | Logs connections and publications. |
+| `log_timestamp true` | — | Adds timestamps to log lines. |
+| `listener 1883` | Plaintext | MQTT traffic without encryption. |
+| `listener 8883` | TLS | MQTT over TLS using the generated certificate. |
+| `max_queued_messages 0` | Unlimited | No queue limit for the lab workload. |
+| `message_size_limit 0` | Unlimited | No payload-size limit for the lab workload. |
 
-El log vive en un **volumen compartido** (`mosquitto-log`). En el refactor actual el
-agente **no** lo consume (la atribución de `client_id` vía log quedó pendiente); sirve
-para depurar el broker.
+The anonymous, unrestricted configuration is intended for local testing only.
+Do not expose it to an untrusted network.
 
-## Certificados (servicio `certgen`)
+## Certificates and logs
 
-El servicio `certgen` del compose genera `certs/server.crt`, `certs/server.key` y
-`certs/ca.crt` con OpenSSL (autofirmados, SAN `DNS:mosquitto,DNS:localhost,IP:127.0.0.1`)
-y prepara `mosquitto/log` con permisos de escritura.
+The `certgen` Compose service creates `server.crt`, `server.key`, and `ca.crt`
+with OpenSSL. The certificate is self-signed and includes
+`mosquitto`, `localhost`, and `127.0.0.1` as SANs. The broker waits up to 60
+seconds for the certificate files before starting.
 
-`mosquitto` **no** usa `depends_on: certgen` porque `podman-compose` traduce cualquier
-`depends_on` a `podman --requires`, y podman rechaza arrancar un contenedor que depende
-de otro ya terminado (`container state improper`). En su lugar, el `command` de
-`mosquitto` espera a que existan los certificados (hasta 60 s) antes de `exec` el broker.
+`certgen` is intentionally not a `depends_on` dependency of Mosquitto because
+Podman Compose may translate that relationship into a requirement on an already
+exited container. The broker performs its own readiness wait instead.
 
-`certs/` y `log/` están en `.gitignore` y `.dockerignore`: son artefactos de runtime.
+Certificates and logs are runtime artifacts ignored by Git. The agent does not
+consume the Mosquitto log; it is available for troubleshooting and inspection.

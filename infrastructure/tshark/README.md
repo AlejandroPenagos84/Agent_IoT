@@ -1,39 +1,51 @@
-# tshark adapters
+# `tshark` adapters
 
-`stream_features.py` is the capture sidecar. It runs tshark, coerces selected
-fields, and appends one JSON record per frame.
+`stream_features.py` is the capture sidecar. It runs `tshark`, coerces the
+selected fields, and appends one JSON record per frame.
 
 `tshark_feature_source.py` implements the application `FeatureSource` port. It
-tails that JSONL file, handles partial lines, and converts records into domain
-context plus model features.
+tails the JSONL file, handles partial lines, and converts records into frame
+context and model features.
 
 `tshark_schema.py` defines the canonical network column order shared by capture,
 frame conversion, and classifiers.
 
-`Dockerfile.capture` empaqueta únicamente los módulos del recolector y su
-schema, además de los `__init__.py`. No necesita `application`, `domain` ni
-dependencias ML. El paquete carga `TsharkFeatureSource` de forma lazy solo
-cuando se importa explícitamente, para que arrancar el recolector con `python
--m infrastructure.tshark.stream_features` no cargue el agente.
+## Container behavior
 
-Para aplicar cambios del sidecar: `podman-compose up -d --build
---force-recreate capture`. Por defecto captura todas las tramas; `--filter`
-permite restringirlas. Los campos del CSV no disponibles en tshark quedan
-como `null` con un aviso.
+[`Dockerfile.capture`](../../Dockerfile.capture) packages only the capture
+modules and schema. It does not need the application, domain, or ML
+dependencies. The sidecar runs in Mosquitto's network namespace with
+`NET_RAW` and `NET_ADMIN` capabilities.
 
-La captura incluye `ip.dst` y `tcp.stream` como contexto de conexión, sin
-añadirlos a las features del modelo. El agente mantiene buffers por conexión y
-dirección: `(tcp.stream, ip.src, tcp.srcport, ip.dst, tcp.dstport)`. Así no mezcla
-respuestas del broker a distintos clientes ni conexiones que reutilizan puertos
-en una misma captura. Cada dirección mantiene su propia ventana.
+Rebuild only the sidecar with:
 
-En modo por conexión se omiten registros sin IP/puerto de origen o destino;
-`tcp.stream` es opcional para fuentes que no lo proporcionan. Las capturas
-antiguas sin `ip.dst` no sirven en este modo. Reconstruir y recrear `capture` y
-`agente` para activar el nuevo contexto; no hace falta borrar el JSONL.
+```bash
+docker compose up -d --build --force-recreate capture
+```
 
-`FrameContext` correlaciona identidad y topic por `tcp.stream`: al observar un
-CONNECT guarda `mqtt.clientid`, y recuerda el último `mqtt.topic` visto. Los
-frames siguientes del mismo flujo heredan ambos, de modo que la alerta no queda
-con `client_id`/`topic` nulos cuando el frame final no los trae. Sin `tcp.stream`
-no hay estado. El estado se reinicia en `start()` y si el JSONL se trunca.
+By default all frames are captured. Use `--filter` to restrict the capture:
+
+```bash
+python -m infrastructure.tshark.stream_features \
+  --iface eth0 --filter mqtt --exclude-topic alertas/deteccion \
+  --out /tmp/features.jsonl
+```
+
+Fields unavailable in a particular `tshark` version are written as `null` with
+a warning. The capture includes `ip.dst` and `tcp.stream` as connection
+context, but those values are not model features.
+
+## Flow context
+
+The agent keeps separate windows for
+`(tcp.stream, ip.src, tcp.srcport, ip.dst, tcp.dstport)`. This prevents
+responses from different clients or reused ports from being mixed. Each
+direction has its own window.
+
+Per-flow mode skips records without complete source and destination endpoint
+data. `tcp.stream` is optional for sources that do not provide it. Older
+captures without `ip.dst` cannot be used in this mode.
+
+`FrameContext` correlates the client ID from CONNECT frames and the latest topic
+by `tcp.stream`. Subsequent frames inherit that context when their own fields
+are absent. State resets at `start()` and when the JSONL input is truncated.
