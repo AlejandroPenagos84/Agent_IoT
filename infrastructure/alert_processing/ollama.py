@@ -52,6 +52,7 @@ def generate_report(
     base_url: str,
     model: str,
     timeout: float = 120.0,
+    print_stream: bool = True,
 ) -> str:
     """Ask Ollama to turn a JSON report into a natural-language report."""
     if not base_url.strip():
@@ -111,8 +112,10 @@ def generate_report(
                     text = message.get("content") if isinstance(message, dict) else None
                     if isinstance(text, str):
                         parts.append(text)
-                        print(text, end="", flush=True)
-                print(file=sys.stdout)
+                        if print_stream:
+                            print(text, end="", flush=True)
+                if print_stream:
+                    print(file=sys.stdout)
         except HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"Ollama returned HTTP {exc.code}: {body}") from exc

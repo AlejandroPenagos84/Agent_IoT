@@ -135,6 +135,38 @@ del agente, en `/alerts/YYYY-MM-DD.jsonl` (fecha UTC, una alerta JSON por línea
 El agente no depende de Ollama y puede detectar y guardar alertas aunque Ollama
 esté detenido; Ollama solo se usa cuando se solicita el reporte natural.
 
+## API REST de reportes naturales
+
+Compose incluye el servicio `report-api`, que deja intactos el agente, el ETL y
+los demás servicios. El endpoint construye el reporte a partir de los resúmenes
+disponibles y devuelve únicamente el texto generado por Ollama:
+
+```bash
+docker compose up --build
+curl -X POST http://localhost:8000/api/v1/reports \
+  -H 'Content-Type: application/json' \
+  -d '{}'
+```
+
+Respuesta:
+
+```json
+{"report":"## Resumen\n..."}
+```
+
+Se puede indicar un modelo o una fecha UTC de referencia para consultar un
+periodo histórico:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/reports \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gemma3:4b","now":"2026-11-07T12:00:00Z"}'
+```
+
+`GET /health` devuelve el estado del servicio. El endpoint responde `404` si
+todavía no hay resúmenes disponibles y `502` si Ollama no puede generar el
+reporte.
+
 ## Normalización de alertas
 
 Las alertas persistidas pueden validarse y normalizarse a Parquet sin afectar al

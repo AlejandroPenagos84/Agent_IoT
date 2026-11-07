@@ -263,6 +263,31 @@ services:
     profiles:
       - etl
 
+  report-api:
+    <<: *app
+    container_name: report-api
+    command:
+      - -m
+      - uvicorn
+      - infrastructure.alert_processing.api:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+    ports:
+      - "${REPORT_API_PORT:-8000}:8000"
+    volumes:
+      - processed-data:/processed:ro
+    environment:
+      REPORT_SUMMARIES_DIR: /processed/summaries
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma3:4b}
+      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-300}
+    depends_on:
+      ollama-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
 volumes:
   mosquitto-log:
   capture-data:
