@@ -283,7 +283,7 @@ services:
     volumes:
       - processed-data:/processed:ro
     environment:
-      REPORT_SUMMARIES_DIR: /processed/summaries
+      REPORT_PATH: /processed/report.json
       OLLAMA_BASE_URL: http://ollama:11434
       OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma3:4b}
       OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-300}

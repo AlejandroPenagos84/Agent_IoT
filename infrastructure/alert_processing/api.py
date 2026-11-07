@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -11,7 +12,6 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from .ollama import generate_report
-from .report import build_last_24h_report
 
 
 class ReportRequest(BaseModel):
@@ -48,13 +48,16 @@ def _reference_time(value: str | None) -> str | None:
 def create_app(
     *,
     summaries_dir: str | Path | None = None,
+    report_path: str | Path | None = None,
     ollama_url: str | None = None,
     default_model: str | None = None,
     timeout: float | None = None,
 ) -> FastAPI:
     """Create the report API using environment-backed production defaults."""
-    summaries_path = Path(summaries_dir or os.getenv(
-        "REPORT_SUMMARIES_DIR", "/processed/summaries"))
+    if report_path is None and summaries_dir is not None:
+        report_path = Path(summaries_dir).parent / "report.json"
+    analytical_report_path = Path(report_path or os.getenv(
+        "REPORT_PATH", "/processed/report.json"))
     base_url = ollama_url or os.getenv(
         "OLLAMA_BASE_URL", "http://ollama:11434")
     model = default_model or os.getenv("OLLAMA_MODEL", "gemma3:4b")
@@ -70,10 +73,15 @@ def create_app(
     def generate_natural_report(request: ReportRequest | None = None) -> ReportResponse:
         request = request or ReportRequest()
         try:
-            analytical_report: dict[str, Any] = build_last_24h_report(
-                summaries_path,
-                now=_reference_time(request.now),
+            if not analytical_report_path.is_file():
+                raise FileNotFoundError(
+                    f"Analytical report does not exist: {analytical_report_path}"
+                )
+            analytical_report = json.loads(
+                analytical_report_path.read_text(encoding="utf-8")
             )
+            if not isinstance(analytical_report, dict):
+                raise ValueError("Analytical report must contain a JSON object")
             natural_report = generate_report(
                 analytical_report,
                 base_url=base_url,
