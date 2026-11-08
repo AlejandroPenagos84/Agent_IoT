@@ -1,0 +1,17 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src
+
+WORKDIR /app
+
+COPY requirements.auth.txt /app/requirements.auth.txt
+RUN python -m pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r /app/requirements.auth.txt
+
+COPY src/auth /app/src/auth
+
+EXPOSE 8000
+
+CMD ["python", "-m", "uvicorn", "auth.http.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,0 +1,45 @@
+name: agent-iot-auth
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: auth-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - auth-redis-data:/data
+    restart: unless-stopped
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: auth-mailhog
+    ports:
+      - "${AUTH_MAILHOG_UI_PORT:-8025}:8025"
+      - "${AUTH_MAILHOG_SMTP_PORT:-1025}:1025"
+    restart: unless-stopped
+
+  auth-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.auth
+    container_name: auth-api
+    env_file:
+      - .env
+    ports:
+      - "${AUTH_API_PORT:-8001}:8000"
+    volumes:
+      - auth-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      mailhog:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  auth-data:
+  auth-redis-data:
