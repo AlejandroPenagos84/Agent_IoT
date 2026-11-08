@@ -1,9 +1,6 @@
 ARG BASE_IMAGE=python:3.11-slim
 FROM ${BASE_IMAGE}
 
-# If you need a CUDA-enabled PyTorch image, build with:
-# docker build --build-arg BASE_IMAGE=pytorch/pytorch:2.14.0-cuda13.0-cudnn8-runtime -t proyecto:latest .
-
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app/src

@@ -1,15 +1,13 @@
 from pathlib import Path
 import importlib.util
-import json
-import tempfile
 import unittest
 
 from detection.application.ports.ports_out import AlertSink, Classifier, FeatureSource
 from detection.application.ports.types import Frame
 from detection.application.use_cases.agent import Agent
 from detection.domain.model import FrameContext
+from detection.infrastructure.tshark.record_parser import RecordParser
 from detection.infrastructure.tshark.tcp_window_features import TCP_FEATURE_COLUMNS
-from detection.infrastructure.tshark.tshark_feature_source import TsharkFeatureSource
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_DIR = ROOT / 'modelos_agente_tcp'
@@ -46,28 +44,18 @@ def context(ts, port=40000):
 
 
 class TcpAgentTests(unittest.TestCase):
-    def test_source_yields_precomputed_tcp_features_and_skips_nulls(self):
+    def test_parser_yields_precomputed_features_and_keeps_connect_context(self):
         features = dict.fromkeys(TCP_FEATURE_COLUMNS, 1.0)
-        records = [
-            {'mqtt.clientid': 'c1', 'tcp.stream': 3, 'ip.src': '10.0.0.1',
-             'tcp.srcport': 40000, 'ip.dst': '10.0.0.2', 'tcp.dstport': 1883,
-             'tcp_features': None},                                   # CONNECT sin ventana
-            {'tcp.stream': 3, 'ip.src': '10.0.0.1', 'tcp.srcport': 40000,
-             'ip.dst': '10.0.0.2', 'tcp.dstport': 1883, 'tcp_features': features},
-            {'tcp.stream': 9, 'ip.src': '10.0.0.1', 'tcp.srcport': 5000,
-             'ip.dst': '10.0.0.3', 'tcp.dstport': 443, 'tcp_features': None},
-        ]
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'features.jsonl'
-            path.write_text(''.join(json.dumps(r) + '\n' for r in records))
-            source = TsharkFeatureSource(str(path), from_start=True,
-                                         feature_key='tcp_features')
-            source.start()
-            rows = source.rows()
-            frame = next(rows)
-            source.stop()
-        self.assertEqual(frame.features, features)
-        self.assertEqual(frame.context.client_id, 'c1')   # heredado del CONNECT
+        parser = RecordParser()
+        connect = {'mqtt.clientid': 'c1', 'tcp.stream': 3, 'ip.src': '10.0.0.1',
+                   'tcp.srcport': 40000, 'ip.dst': '10.0.0.2', 'tcp.dstport': 1883}
+        publish = {'tcp.stream': 3, 'ip.src': '10.0.0.1', 'tcp.srcport': 40000,
+                   'ip.dst': '10.0.0.2', 'tcp.dstport': 1883,
+                   'tcp_features': features}
+        self.assertIsNone(parser.features(connect))
+        parser.context(connect)
+        self.assertEqual(parser.features(publish), features)
+        self.assertEqual(parser.context(publish).client_id, 'c1')
 
     def test_cooldown_limits_alerts_per_flow(self):
         frames = [Frame({}, context(t)) for t in (0.0, 1.0, 4.9, 5.0, 9.0)]

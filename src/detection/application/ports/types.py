@@ -18,3 +18,4 @@ class Frame:
     """Network features and metadata for one captured frame."""
     features: FeatureRow
     context: FrameContext
+    record: dict | None = None

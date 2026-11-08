@@ -1,6 +1,6 @@
-"""tshark capture and JSONL frame source adapters."""
+"""tshark capture and asyncio socket server adapters."""
 
-__all__ = ["TsharkFeatureSource"]
+__all__ = ["AsyncSocketServer"]
 
 
 def __getattr__(name):
@@ -8,7 +8,7 @@ def __getattr__(name):
 
     The capture sidecar runs this package without application/domain installed.
     """
-    if name == 'TsharkFeatureSource':
-        from .tshark_feature_source import TsharkFeatureSource
-        return TsharkFeatureSource
+    if name == 'AsyncSocketServer':
+        from .async_socket_server import AsyncSocketServer
+        return AsyncSocketServer
     raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

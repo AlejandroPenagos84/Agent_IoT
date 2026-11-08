@@ -1,0 +1,33 @@
+vars {
+  @description('''Production auth API base URL''')
+  authUrl: https://auth.example.com
+
+  @description('''Production detection API base URL''')
+  apiUrl: https://api.example.com
+
+  @description('''Leave empty when auth uses a real mailbox''')
+  mailhogUrl:
+
+  username:
+  email:
+  password:
+  emailCode:
+
+  tenantId:
+  brokerId:
+  sensorId:
+  alertId:
+
+  brokerName:
+  brokerHost:
+  brokerPort: 1883
+  sensorName:
+}
+
+vars:secret [
+  accessToken,
+  sensorToken,
+  agentToken,
+  enrollmentKey,
+  sensorSecret
+]

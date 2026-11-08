@@ -1,0 +1,28 @@
+# Captura en el servidor del cliente (alternativa al `docker run` que muestra la web).
+#
+#   ENROLL_KEY=ek_... API_URL=https://api.tudominio.com \
+#     docker compose -f docker-compose.capture.yml up -d
+#
+# La captura comparte la red del contenedor de Mosquitto (MOSQUITTO_CONTAINER),
+# se inscribe sola con la clave del broker y guarda su identidad en el volumen
+# `capture-state`. Solo hace conexiones de salida: API (443) y agente (8443).
+services:
+  capture:
+    image: ${CAPTURE_IMAGE:-ghcr.io/agentiot/capture:latest}
+    build:
+      context: .
+      dockerfile: Dockerfile.capture
+    container_name: agentiot-capture
+    network_mode: "container:${MOSQUITTO_CONTAINER:-mosquitto}"
+    cap_add:
+      - NET_RAW
+    command: ["--iface", "${CAPTURE_IFACE:-eth0}", "--exclude-topic", "alertas/deteccion"]
+    environment:
+      ENROLL_KEY: ${ENROLL_KEY:?pega la clave de inscripción del broker}
+      API_URL: ${API_URL:?define la URL pública de la API}
+    volumes:
+      - capture-state:/state
+    restart: unless-stopped
+
+volumes:
+  capture-state:

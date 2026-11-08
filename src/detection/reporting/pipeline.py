@@ -13,7 +13,8 @@ from typing import Any, Iterable
 
 REQUIRED_FIELDS = ('ts', 'kind', 'label')
 OPTIONAL_FIELDS = (
-    'alert_id', 'run_id', 'client_id', 'ip', 'topic', 'mse', 'source')
+    'alert_id', 'run_id', 'tenant_id', 'broker_id', 'sensor_id',
+    'client_id', 'ip', 'topic', 'mse', 'source')
 KNOWN_KINDS = frozenset({'class'})
 KNOWN_SOURCES = frozenset({'tshark', 'tshark-tcp', 'mqtt', 'classifier', 'agente'})
 _SPACE_RE = re.compile(r'\s+')
@@ -103,8 +104,8 @@ def _mse(value: Any) -> float | None:
 def _stable_alert_id(record: dict[str, Any]) -> str:
     canonical = json.dumps(
         {key: record.get(key) for key in (
-            'ts_utc', 'kind', 'label', 'client_id', 'ip', 'topic',
-            'mse', 'source', 'run_id')},
+            'ts_utc', 'kind', 'label', 'tenant_id', 'broker_id', 'sensor_id',
+            'client_id', 'ip', 'topic', 'mse', 'source', 'run_id')},
         sort_keys=True, separators=(',', ':'), ensure_ascii=False)
     return f'generated:{hashlib.sha256(canonical.encode()).hexdigest()}'
 
@@ -154,6 +155,9 @@ class AlertProcessingPipeline:
         normalized = {
             'alert_id': _optional_text(raw.get('alert_id'), 'alert_id'),
             'run_id': _optional_text(raw.get('run_id'), 'run_id'),
+            'tenant_id': _optional_text(raw.get('tenant_id'), 'tenant_id'),
+            'broker_id': _optional_text(raw.get('broker_id'), 'broker_id'),
+            'sensor_id': _optional_text(raw.get('sensor_id'), 'sensor_id'),
             'ts_original': original_ts,
             'ts_utc': ts_utc,
             'kind': kind,

@@ -1,0 +1,20 @@
+meta {
+  name: Get alert by id
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{apiUrl}}/api/v1/alerts/{{alertId}}
+}
+
+headers {
+  Authorization: Bearer {{accessToken}}
+}
+
+tests {
+  test("returns the stored alert", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.alert_id).to.equal((bru.getVar("alertId") || bru.getEnvVar("alertId")));
+  });
+}

@@ -1,0 +1,27 @@
+meta {
+  name: Verify email
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{authUrl}}/api/v1/auth/verify-email
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body {
+  {
+    "email": "{{email}}",
+    "code": "{{emailCode}}"
+  }
+}
+
+tests {
+  test("user is active", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.status).to.equal("active");
+  });
+}

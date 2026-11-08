@@ -1,0 +1,19 @@
+meta {
+  name: Sensors are gone after broker deletion
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{apiUrl}}/api/v1/brokers/{{brokerId}}/sensors
+}
+
+headers {
+  Authorization: Bearer {{accessToken}}
+}
+
+tests {
+  test("broker no longer exists", function() {
+    expect(res.status).to.equal(404);
+  });
+}

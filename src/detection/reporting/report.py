@@ -158,10 +158,31 @@ def build_last_24h_report(
     period overlap and their stored aggregate is retained.
     """
     root = Path(summaries_dir)
+    run_path = root / "runs" / "summary.parquet"
+    summaries = {
+        summary_type: _read_summary(root, summary_type)
+        for summary_type in SUMMARY_TYPES
+    }
+    summaries["runs"] = _read_summary(root, "runs") if run_path.is_file() \
+        else pd.DataFrame()
+    return build_report_from_summaries(
+        summaries, now=now, output_timezone=output_timezone)
+
+
+def build_report_from_summaries(
+    summaries: dict[str, pd.DataFrame],
+    *,
+    now: datetime | pd.Timestamp | None = None,
+    output_timezone: str = "UTC",
+) -> dict[str, Any]:
+    """Build the 24-hour report from in-memory summary tables.
+
+    ``summaries`` maps ``runs``, ``clients``, ``ips``, ``topics`` and
+    ``temporal`` to the frames produced by ``summaries.summarize_frame``.
+    """
     end = _timestamp(now or datetime.now(timezone.utc))
     start = end - pd.Timedelta(hours=24)
-    run_path = root / "runs" / "summary.parquet"
-    runs_all = _read_summary(root, "runs") if run_path.is_file() else pd.DataFrame()
+    runs_all = summaries.get("runs", pd.DataFrame())
     requested_start, requested_end = start, end
     if not runs_all.empty:
         available_start = min(_timestamp(value) for value in runs_all["period_start"])
@@ -170,10 +191,10 @@ def build_last_24h_report(
             end = available_end
             start = end - pd.Timedelta(hours=24)
     frames = {
-        summary_type: _window(_read_summary(root, summary_type), start, end)
+        summary_type: _window(summaries[summary_type], start, end)
         for summary_type in SUMMARY_TYPES
     }
-    runs = _window(_read_summary(root, "runs"), start, end) if run_path.is_file() else pd.DataFrame()
+    runs = _window(runs_all, start, end) if not runs_all.empty else pd.DataFrame()
 
     clients = frames["clients"]
     temporal = frames["temporal"]

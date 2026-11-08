@@ -15,7 +15,7 @@ class ApiSettings:
     ollama_url: str
     ollama_model: str
     ollama_timeout: float
-
+    report_timezone: str = "America/Bogota"
     @classmethod
     def from_env(
         cls,
@@ -36,4 +36,5 @@ class ApiSettings:
                 "OLLAMA_BASE_URL", "http://ollama:11434"),
             ollama_model=default_model or os.getenv("OLLAMA_MODEL", "gemma3:4b"),
             ollama_timeout=timeout or float(os.getenv("OLLAMA_TIMEOUT", "300")),
+            report_timezone=os.getenv("REPORT_TIMEZONE", "America/Bogota"),
         )

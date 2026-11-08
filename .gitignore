@@ -6,3 +6,5 @@ __pycache__/
 mosquitto/certs/
 mosquitto/log/
 AGENTS.md
+
+certs/

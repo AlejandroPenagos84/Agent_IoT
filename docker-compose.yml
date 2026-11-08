@@ -12,7 +12,7 @@ services:
       - |
         set -e
         apk add --no-cache openssl >/dev/null
-        mkdir -p /mosquitto/log
+        mkdir -p /mosquitto/log /agent-certs
         chmod 777 /mosquitto/log
         if [ ! -f /certs/server.crt ]; then
           openssl req -x509 -newkey rsa:2048 -nodes \
@@ -21,10 +21,37 @@ services:
             -addext "subjectAltName=DNS:mosquitto,DNS:localhost,IP:127.0.0.1"
           cp /certs/server.crt /certs/ca.crt
         fi
+        if [ ! -f /agent-certs/server.crt ]; then
+          openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout /agent-certs/ca.key -out /agent-certs/ca.crt -days 3650 \
+            -subj "/CN=agent-iot-ca" \
+            -addext "basicConstraints=critical,CA:TRUE" \
+            -addext "keyUsage=critical,keyCertSign,cRLSign" \
+            -addext "subjectKeyIdentifier=hash"
+          openssl req -newkey rsa:2048 -nodes \
+            -keyout /agent-certs/server.key -out /agent-certs/server.csr \
+            -subj "/CN=agente"
+          cat > /agent-certs/server.ext <<'EOF'
+        [v3_req]
+        basicConstraints=CA:FALSE
+        keyUsage=digitalSignature,keyEncipherment
+        extendedKeyUsage=serverAuth
+        subjectAltName=DNS:agente,DNS:localhost,IP:127.0.0.1
+        EOF
+          openssl x509 -req -in /agent-certs/server.csr \
+            -CA /agent-certs/ca.crt -CAkey /agent-certs/ca.key \
+            -CAcreateserial -out /agent-certs/server.crt -days 3650 \
+            -extfile /agent-certs/server.ext -extensions v3_req
+          rm -f /agent-certs/server.csr /agent-certs/server.ext \
+            /agent-certs/ca.srl
+        fi
         chmod 644 /certs/server.key /certs/server.crt /certs/ca.crt
+        chmod 644 /agent-certs/ca.crt /agent-certs/server.crt
+        chmod 600 /agent-certs/server.key /agent-certs/ca.key
         echo "certificados listos"
     volumes:
       - ./mosquitto/certs:/certs:z
+      - ./certs/agent:/agent-certs
       - mosquitto-log:/mosquitto/log
     restart: "no"
 
@@ -62,6 +89,9 @@ services:
   ollama:
     image: ollama/ollama:latest
     container_name: ollama
+    profiles:
+      - ollama
+      - etl
     ports:
       - "${OLLAMA_PORT:-11435}:11434"
     volumes:
@@ -77,6 +107,9 @@ services:
   ollama-init:
     image: ollama/ollama:latest
     container_name: ollama-init
+    profiles:
+      - ollama
+      - etl
     environment:
       OLLAMA_HOST: http://ollama:11434
       OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma3:4b}
@@ -94,6 +127,22 @@ services:
         condition: service_healthy
     restart: "no"
 
+  # Hace lo mismo que "Agregar broker" en la web: registra el Mosquitto local
+  # y deja su clave de inscripción. Idempotente: no duplica en cada `up`.
+  bootstrap:
+    <<: *app
+    container_name: bootstrap
+    command: ["-m", "detection.infrastructure.dev_bootstrap"]
+    environment:
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-}
+      DETECTION_DB_PATH: /data/detection.db
+      DEV_TENANT_ID: ${DEV_TENANT_ID:-}
+      DEV_BROKER_NAME: ${DEV_BROKER_NAME:-mosquitto-dev}
+    volumes:
+      - detection-data:/data
+      - bootstrap-data:/bootstrap
+    restart: "no"
+
   capture:
     build:
       context: .
@@ -103,48 +152,70 @@ services:
     network_mode: "service:mosquitto"
     cap_add:
       - NET_RAW
-      - NET_ADMIN
+    # Se inscribe con la clave del bootstrap, igual que en un cliente. En
+    # desarrollo envía por el socket Unix local, que no exige token.
+    entrypoint: ["/bin/sh", "-c"]
     command:
-      - --iface
-      - eth0
-      - --filter
-      - ""
-      - --exclude-topic
-      - alertas/deteccion
-      - --out
-      - /capture/features.jsonl
+      - |
+        . /bootstrap/dev.env
+        exec python -m detection.infrastructure.tshark.stream_features \
+          --iface eth0 --filter "" \
+          --exclude-topic alertas/deteccion \
+          --endpoint unix:///capture/features.sock
+    environment:
+      SENSOR_NAME: capture-dev
     volumes:
       - capture-data:/capture
+      - capture-state:/state
+      - bootstrap-data:/bootstrap:ro
     depends_on:
       mosquitto:
+        condition: service_healthy
+      bootstrap:
+        condition: service_completed_successfully
+      report-api:
         condition: service_healthy
     restart: unless-stopped
 
   agente:
     <<: *app
     container_name: agente
+    entrypoint: ["/bin/sh", "-c"]
     command:
-      - -c
       - |
+        . /bootstrap/dev.env
+        exec python -c "
+        import os
         from detection.composition_root import AgentConfig, build_agent
         build_agent(AgentConfig(
-            capture_path='/capture/features.jsonl',
-            model_dir=('/app/modelos_agente_tcp' if '${MODELO:-tcp}' == 'tcp'
-                       else '/app/modelos_agente'),
+            capture_endpoint='unix:///capture/features.sock',
+            model_dir='/app/modelos_agente_tcp',
             broker_host='mosquitto',
             username='agente',
             alert_topic='alertas/deteccion',
             alert_dir='/alerts',
-            model='${MODELO:-tcp}',
+            evidence_dir='/evidence',
+            alert_api_url=os.getenv('ALERT_API_URL') or None,
+            alert_api_ca=os.getenv('ALERT_API_CA') or None,
         )).run()
+        "
+    environment:
+      # El agente genera y renueva su propio token de API con este secreto.
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-}
+      ALERT_API_CA: ${ALERT_API_CA:-}
     depends_on:
       mosquitto:
         condition: service_healthy
+      bootstrap:
+        condition: service_completed_successfully
+      report-api:
+        condition: service_healthy
     volumes:
-      - capture-data:/capture:ro
+      - capture-data:/capture
       - alert-data:/alerts
+      - evidence-data:/evidence
       - processed-data:/processed:ro
-      - ./modelos_agente:/app/modelos_agente:ro,z
+      - bootstrap-data:/bootstrap:ro
       - ./modelos_agente_tcp:/app/modelos_agente_tcp:ro,z
     restart: unless-stopped
 
@@ -157,6 +228,7 @@ services:
         set -eu
         interval="$${ETL_INTERVAL_SECONDS:-300}"
         while :; do
+          python -m detection.reporting.retention
           if find /alerts -maxdepth 1 -type f -name '*.jsonl' -size +0c | grep -q .; then
             python -m detection.reporting \
               --input /alerts \
@@ -175,8 +247,11 @@ services:
     environment:
       ETL_INTERVAL_SECONDS: ${ETL_INTERVAL_SECONDS:-300}
       REPORT_TIMEZONE: ${REPORT_TIMEZONE:-America/Bogota}
+      EVIDENCE_RETENTION_DAYS: ${EVIDENCE_RETENTION_DAYS:-30}
+      ALERT_RETENTION_DAYS: ${ALERT_RETENTION_DAYS:-0}
     volumes:
       - alert-data:/alerts
+      - evidence-data:/evidence
       - processed-data:/processed
     depends_on:
       agente:
@@ -186,6 +261,8 @@ services:
   simulador:
     <<: *app
     container_name: simulador
+    profiles:
+      - simulator
     command:
       - -m
       - simulation
@@ -287,19 +364,44 @@ services:
       - "${REPORT_API_PORT:-8000}:8000"
     volumes:
       - processed-data:/processed:ro
+      - alert-data:/alerts
+      - detection-data:/data
+      - ./certs/agent/ca.crt:/certs/agent/ca.crt:ro
     environment:
       REPORT_PATH: /processed/report.json
       OLLAMA_BASE_URL: http://ollama:11434
       OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma3:4b}
       OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-300}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
+      DETECTION_DB_PATH: /data/detection.db
+      ALERTS_DIR: /alerts
+      REPORT_TIMEZONE: ${REPORT_TIMEZONE:-America/Bogota}
+      SENSOR_TOKEN_TTL_MINUTES: ${SENSOR_TOKEN_TTL_MINUTES:-1440}
+      # Lo que la web muestra en el comando de instalación y lo que recibe la
+      # captura al inscribirse. En producción: URLs públicas.
+      PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:8000}
+      AGENT_PUBLIC_ENDPOINT: ${AGENT_PUBLIC_ENDPOINT:-tls://localhost:8443}
+      AGENT_TLS_SERVER_NAME: ${AGENT_TLS_SERVER_NAME:-agente}
+      AGENT_CA_PATH: /certs/agent/ca.crt
+      CAPTURE_IMAGE: ${CAPTURE_IMAGE:-proyecto-capture:latest}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
     depends_on:
-      ollama-init:
+      certgen:
         condition: service_completed_successfully
     restart: unless-stopped
 
 volumes:
+  bootstrap-data:
+  capture-state:
   mosquitto-log:
   capture-data:
   alert-data:
+  detection-data:
+  evidence-data:
   processed-data:
   ollama-data:

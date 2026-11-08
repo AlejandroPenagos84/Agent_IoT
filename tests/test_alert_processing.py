@@ -31,6 +31,9 @@ class AlertProcessingTests(unittest.TestCase):
             self.assertEqual(record['missing_fields'], {
                 'alert_id': 1,
                 'run_id': 1,
+                'tenant_id': 1,
+                'broker_id': 1,
+                'sensor_id': 1,
             })
             self.assertEqual(record['unknown_sources'], {'custom-detector': 1})
             saved = (output / 'processing_errors.jsonl').read_text()

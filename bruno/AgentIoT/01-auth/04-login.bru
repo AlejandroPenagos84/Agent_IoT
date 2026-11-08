@@ -1,0 +1,32 @@
+meta {
+  name: Login
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{authUrl}}/api/v1/auth/login
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body {
+  {
+    "email": "{{email}}",
+    "password": "{{password}}"
+  }
+}
+
+script:post-response {
+  bru.setVar("accessToken", res.body.access_token);
+}
+
+tests {
+  test("login returns an access token", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.access_token).to.be.a("string");
+    expect(res.body.expires_in).to.be.a("number");
+  });
+}

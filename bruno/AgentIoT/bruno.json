@@ -1,0 +1,7 @@
+{
+  "version": "1",
+  "name": "Agent IoT",
+  "type": "collection",
+  "defaultEnvironment": "Local",
+  "ignore": []
+}

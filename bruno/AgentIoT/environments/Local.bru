@@ -1,0 +1,38 @@
+vars {
+  @description('''Auth API base URL''')
+  authUrl: http://localhost:8001
+
+  @description('''Detection API base URL''')
+  apiUrl: http://localhost:8000
+
+  @description('''Mailhog UI/API (local auth testing)''')
+  mailhogUrl: http://localhost:8025
+
+  @description('''Test user created by the register request''')
+  username: tester
+  email: tester@example.com
+  password: secreto123
+
+  @description('''Six-digit code extracted from Mailhog''')
+  emailCode:
+
+  @description('''Filled by the scripts: login, register, broker, sensor, alert''')
+  tenantId:
+  brokerId:
+  sensorId:
+  alertId:
+
+  @description('''Broker fields for test data''')
+  brokerName: bodega
+  brokerHost: mosquitto
+  brokerPort: 1883
+  sensorName: bodega-1
+}
+
+vars:secret [
+  accessToken,
+  sensorToken,
+  agentToken,
+  enrollmentKey,
+  sensorSecret
+]

@@ -1,79 +1,66 @@
-from pathlib import Path
-import shutil
-import struct
-import subprocess
-import tempfile
 import unittest
 
 from detection.infrastructure.tshark.stream_features import (
-    FIELDS, build_command, build_display_filter, parse_args, record_from_fields,
+    CAPTURE_FIELDS, RECORD_FIELDS, build_command, build_display_filter,
+    parse_args, record_from_fields, wire_record,
 )
 
+SENSITIVE = {'mqtt.passwd', 'mqtt.username', 'mqtt.msg',
+             'mqtt.willmsg', 'mqtt.willtopic'}
 
-def publish(topic, payload, qos=0):
-    encoded = topic.encode()
-    body = len(encoded).to_bytes(2, 'big') + encoded
-    if qos:
-        body += b'\x00\x01'
-    body += payload.encode()
-    remaining = len(body)
-    length = bytearray()
-    while True:
-        byte = remaining % 128
-        remaining //= 128
-        length.append(byte | (128 if remaining else 0))
-        if not remaining:
-            break
-    return bytes([0x30 | (qos << 1)]) + bytes(length) + body
+
+def _record(**values):
+    return record_from_fields(
+        [values.get(field, '') for field in CAPTURE_FIELDS])
 
 
 class CaptureTests(unittest.TestCase):
-    def test_capture_selects_all_frames_by_default_and_all_csv_fields(self):
+    def test_capture_requests_only_minimal_safe_fields(self):
         command = build_command(parse_args([]))
         self.assertNotIn('-Y', command)
-        with (Path(__file__).resolve().parents[1] / 'dataset' / 'DoS.csv').open() as handle:
-            header = handle.readline()
-        self.assertEqual(set(header.strip().split(',')) - {'type'}, set(FIELDS) - {'tcp.stream'})
+        for field in CAPTURE_FIELDS:
+            self.assertIn(field, command)
+        for field in SENSITIVE:
+            self.assertNotIn(field, command)
+
+    def test_display_filter_excludes_topic(self):
         self.assertEqual(build_display_filter('', 'alertas/deteccion'),
                          '!(mqtt.topic == "alertas/deteccion")')
 
-    def test_wire_payload_decodes_like_csv(self):
-        record = record_from_fields(['34:30:30', '3'], ('mqtt.msg', 'mqtt.msgtype'))
-        self.assertEqual(record['mqtt.msg'], '400')
-        self.assertEqual(record['mqtt.msgtype'], '3')
+    def test_wire_record_has_no_sensitive_fields(self):
+        record = _record(**{
+            'frame.time_epoch': '1762624800.5',
+            'frame.time_delta': '0.1',
+            'frame.len': '66',
+            'ip.src': '10.0.0.1',
+            'ip.dst': '10.0.0.2',
+            'tcp.srcport': '40000',
+            'tcp.dstport': '1883',
+            'tcp.stream': '7',
+            'mqtt.msgtype': '3',
+            'mqtt.clientid': 'sensor1',
+            'mqtt.topic': 'home/temp',
+        })
+        wire = wire_record(record, {'frame.len': 66.0})
+        self.assertEqual(set(wire), set(RECORD_FIELDS))
+        self.assertNotIn('mqtt.msgtype', wire)
+        self.assertFalse(SENSITIVE & set(wire))
+        self.assertEqual(wire['tcp_features'], {'frame.len': 66.0})
+        self.assertEqual(wire['frame.time_epoch'], 1762624800.5)
+        self.assertEqual(wire['tcp.stream'], 7)
 
-    @unittest.skipUnless(shutil.which('tshark'), 'tshark no instalado')
-    def test_actual_tshark_fields_and_payload(self):
-        import csv
-        registry = subprocess.run(['tshark', '-G', 'fields'], capture_output=True,
-                                  text=True, check=True).stdout
-        available = {line.split('\t')[2] for line in registry.splitlines()
-                     if line.startswith('F\t') and len(line.split('\t')) > 2}
-        fields = tuple(field for field in FIELDS if field in available)
-        self.assertIn('mqtt.msg', fields)
-        self.assertIn('mqtt.msgtype', fields)
-        # Ethernet + IPv4 + TCP + PUBLISH; fixture generado solo en /tmp.
-        payload = publish('distance/ultrasonic1', '400')
-        ethernet = bytes.fromhex('00112233445566778899aabb0800')
-        ip = struct.pack('!BBHHHBBH4s4s', 0x45, 0, 40 + len(payload), 1, 0,
-                         64, 6, 0, b'\x0a\x00\x00\x01', b'\x0a\x00\x00\x02')
-        tcp = struct.pack('!HHIIBBHHH', 40000, 1883, 1, 1, 0x50, 0x18, 65535, 0, 0)
-        packet = ethernet + ip + tcp + payload
-        with tempfile.TemporaryDirectory(prefix='mqtt-pcap-') as directory:
-            path = Path(directory) / 'fixture.pcap'
-            path.write_bytes(struct.pack('<IHHIIII', 0xa1b2c3d4, 2, 4, 0, 0, 65535, 1)
-                             + struct.pack('<IIII', 1, 0, len(packet), len(packet)) + packet)
-            command = ['tshark', '-n', '-r', str(path), '-T', 'fields',
-                       '-E', 'occurrence=f', '-E', 'quote=d']
-            for field in fields:
-                command.extend(('-e', field))
-            result = subprocess.run(command, capture_output=True, text=True, check=True)
-        values = next(csv.reader([result.stdout.rstrip('\n')], delimiter='\t'))
-        record = record_from_fields(values, fields)
-        self.assertEqual(record['mqtt.msg'], '400')
-        self.assertEqual(record['mqtt.topic'], 'distance/ultrasonic1')
-        self.assertEqual(record['mqtt.msgtype'], '3')
-        self.assertEqual(record['ip.dst'], '10.0.0.2')
+    def test_wire_record_carries_identity(self):
+        record = _record(**{'tcp.stream': '7'})
+        wire = wire_record(record, {'frame.len': 1.0}, {
+            'tenant_id': 't1', 'broker_id': 'b1', 'sensor_id': 's1'})
+        self.assertEqual(wire['tenant_id'], 't1')
+        self.assertEqual(wire['broker_id'], 'b1')
+        self.assertEqual(wire['sensor_id'], 's1')
+
+    def test_missing_fields_are_null(self):
+        record = _record(**{'tcp.stream': '7'})
+        self.assertIsNone(record['ip.src'])
+        self.assertEqual(record['tcp.stream'], 7)
 
 
 if __name__ == '__main__':

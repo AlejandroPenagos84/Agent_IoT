@@ -42,3 +42,12 @@ class AlertSink(ABC):
     """Deliver an alert to an external system."""
     @abstractmethod
     def emit(self, alert: Alert) -> None: ...
+
+
+'''
+Persists the raw frames around an emitted alert so it can be reviewed later.
+'''
+class EvidenceSink(ABC):
+    """Store the frames that led to an alert."""
+    @abstractmethod
+    def write(self, alert: Alert, key, records: Sequence[dict]) -> None: ...

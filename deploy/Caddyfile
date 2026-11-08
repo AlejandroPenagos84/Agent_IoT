@@ -1,0 +1,31 @@
+# Entrada pública de la central (producción).
+# Caddy obtiene y renueva certificados de Let's Encrypt para los dos dominios.
+# El agente reutiliza el certificado de AGENT_DOMAIN para su puerto TLS 8443,
+# así los clientes no necesitan copiar ninguna CA.
+{
+	email {$ACME_EMAIL}
+	# Laboratorio sin dominio público: CADDY_EXTRA_GLOBAL=local_certs usa la CA
+	# interna de Caddy en vez de Let's Encrypt.
+	{$CADDY_EXTRA_GLOBAL}
+}
+
+{$API_DOMAIN} {
+	encode gzip
+	# Auth vive en su propio proyecto Compose y publica el puerto 8001 en el host.
+	handle /api/v1/auth/* {
+		reverse_proxy {$AUTH_UPSTREAM:host.docker.internal:8001}
+	}
+	handle {
+		reverse_proxy report-api:8000
+	}
+	request_body {
+		max_size 1MB
+	}
+	header -Server
+}
+
+# Solo existe para que Caddy emita el certificado del agente. El tráfico de
+# captura va directo al agente por el puerto 8443.
+{$AGENT_DOMAIN} {
+	respond "agent-iot" 200
+}

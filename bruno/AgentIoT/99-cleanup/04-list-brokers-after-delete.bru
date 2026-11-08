@@ -1,0 +1,21 @@
+meta {
+  name: Deleted broker is no longer listed
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{apiUrl}}/api/v1/brokers
+}
+
+headers {
+  Authorization: Bearer {{accessToken}}
+}
+
+tests {
+  test("deleted broker is absent", function() {
+    expect(res.status).to.equal(200);
+    const ids = res.body.map((broker) => broker.id);
+    expect(ids).to.not.include((bru.getVar("brokerId") || bru.getEnvVar("brokerId")));
+  });
+}

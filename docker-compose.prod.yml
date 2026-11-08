@@ -1,0 +1,121 @@
+# Central de producción: Caddy (HTTPS público), report-api y el agente TLS.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Requiere en .env: API_DOMAIN, AGENT_DOMAIN, ACME_EMAIL y AUTH_JWT_SECRET.
+# Los dos dominios deben apuntar a esta máquina y los puertos 80, 443 y 8443
+# deben estar abiertos. La captura del Mosquitto local, el bootstrap y el
+# simulador son solo de desarrollo y no arrancan aquí.
+#
+# Sin dominio público (laboratorio), deja AGENT_CERT_MODE=self-signed: el agente
+# usa la CA de `certgen` y la API la entrega a cada captura al inscribirse.
+
+x-agent-cert: &agent-cert
+  # public: certificado de Let's Encrypt emitido por Caddy para AGENT_DOMAIN.
+  # self-signed: certs/agent de certgen (la captura recibe la CA al inscribirse).
+  AGENT_CERT_MODE: ${AGENT_CERT_MODE:-public}
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    ports:
+      # Docker rootless no puede abrir puertos < 1024: usa HTTP_PORT=8080 y
+      # HTTPS_PORT=8444 con una redirección en el firewall, o Docker con root.
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?define API_DOMAIN en .env}
+      AGENT_DOMAIN: ${AGENT_DOMAIN:?define AGENT_DOMAIN en .env}
+      ACME_EMAIL: ${ACME_EMAIL:?define ACME_EMAIL en .env}
+      AUTH_UPSTREAM: ${AUTH_UPSTREAM:-host.docker.internal:8001}
+      CADDY_EXTRA_GLOBAL: ${CADDY_EXTRA_GLOBAL:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro,z
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      report-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  report-api:
+    # Solo Caddy la expone; no se publica el puerto 8000.
+    ports: !reset []
+    environment:
+      PUBLIC_API_URL: https://${API_DOMAIN}
+      AGENT_PUBLIC_ENDPOINT: tls://${AGENT_DOMAIN}:${AGENT_PORT:-8443}
+      AGENT_TLS_SERVER_NAME: ${AGENT_DOMAIN}
+      # Vacío con certificado público: la captura usa las CA del sistema.
+      AGENT_CA_PATH: ${AGENT_CA_PATH:-}
+      CAPTURE_IMAGE: ${CAPTURE_IMAGE:-ghcr.io/agentiot/capture:latest}
+
+  # Bus interno de alertas del agente; no se expone fuera de la central.
+  mosquitto:
+    ports: !reset []
+
+  agente:
+    entrypoint: ["/bin/sh", "-c"]
+    depends_on: !override
+      mosquitto:
+        condition: service_healthy
+      report-api:
+        condition: service_healthy
+    ports:
+      - "${AGENT_PORT:-8443}:8443"
+    volumes:
+      - alert-data:/alerts
+      - evidence-data:/evidence
+      - processed-data:/processed:ro
+      - ./modelos_agente_tcp:/app/modelos_agente_tcp:ro,z
+      - ./certs/agent:/certs:ro
+      - caddy-data:/caddy:ro
+    environment:
+      <<: *agent-cert
+      AGENT_DOMAIN: ${AGENT_DOMAIN}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?define AUTH_JWT_SECRET en .env}
+      ALERT_API_URL: http://report-api:8000/api/v1/alerts
+    command:
+      - |
+        set -eu
+        if [ "$$AGENT_CERT_MODE" = public ]; then
+          dir=/caddy/caddy/certificates/acme-v02.api.letsencrypt.org-directory/$$AGENT_DOMAIN
+          export TLS_CERT=$$dir/$$AGENT_DOMAIN.crt TLS_KEY=$$dir/$$AGENT_DOMAIN.key
+          i=0
+          until [ -s "$$TLS_CERT" ]; do
+            i=$$((i + 1))
+            [ "$$i" -gt 120 ] && { echo "Caddy no emitió el certificado de $$AGENT_DOMAIN" >&2; exit 1; }
+            sleep 5
+          done
+        else
+          export TLS_CERT=/certs/server.crt TLS_KEY=/certs/server.key
+        fi
+        exec python -c "
+        import os
+        from detection.composition_root import AgentConfig, build_agent
+        build_agent(AgentConfig(
+            capture_endpoint='tls://0.0.0.0:8443',
+            model_dir='/app/modelos_agente_tcp',
+            broker_host='mosquitto',
+            username='agente',
+            alert_topic='alertas/deteccion',
+            alert_dir='/alerts',
+            evidence_dir='/evidence',
+            tls_cert=os.environ['TLS_CERT'],
+            tls_key=os.environ['TLS_KEY'],
+            require_sensor_token=True,
+            alert_api_url=os.environ['ALERT_API_URL'],
+        )).run()
+        "
+
+  # Solo desarrollo.
+  bootstrap:
+    profiles: !override [dev]
+  capture:
+    profiles: !override [dev]
+
+volumes:
+  caddy-data:
+  caddy-config:

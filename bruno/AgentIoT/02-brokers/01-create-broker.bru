@@ -1,0 +1,36 @@
+meta {
+  name: Create broker (returns enrollment key)
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{apiUrl}}/api/v1/brokers
+}
+
+headers {
+  Content-Type: application/json
+  Authorization: Bearer {{accessToken}}
+}
+
+body {
+  {
+    "name": "{{brokerName}}",
+    "host": "{{brokerHost}}",
+    "port": {{brokerPort}}
+  }
+}
+
+script:post-response {
+  bru.setVar("brokerId", res.body.id);
+  bru.setVar("enrollmentKey", res.body.enrollment_key);
+}
+
+tests {
+  test("broker is created with its install command", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body.status).to.equal("pending");
+    expect(res.body.enrollment_key).to.match(/^ek_/);
+    expect(res.body.install_command).to.include(res.body.enrollment_key);
+  });
+}

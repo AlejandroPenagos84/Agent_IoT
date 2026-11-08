@@ -1,0 +1,24 @@
+meta {
+  name: Refresh sensor token (heartbeat every 60 s)
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{apiUrl}}/api/v1/sensors/token/refresh
+}
+
+headers {
+  Authorization: Bearer {{sensorSecret}}
+}
+
+script:post-response {
+  bru.setVar("sensorToken", res.body.access_token);
+}
+
+tests {
+  test("sensor secret returns a fresh token", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.access_token).to.be.a("string");
+  });
+}

@@ -1,0 +1,35 @@
+meta {
+  name: Enroll capture (what the capture does on start)
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{apiUrl}}/api/v1/sensors/enroll
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body {
+  {
+    "enrollment_key": "{{enrollmentKey}}",
+    "name": "{{sensorName}}"
+  }
+}
+
+script:post-response {
+  bru.setVar("sensorId", res.body.sensor_id);
+  bru.setVar("sensorToken", res.body.access_token);
+  bru.setVar("sensorSecret", res.body.sensor_secret);
+}
+
+tests {
+  test("capture receives identity and credentials", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body.broker_id).to.equal(bru.getVar("brokerId"));
+    expect(res.body.sensor_secret).to.match(/^ss_/);
+    expect(res.body.agent_endpoint).to.match(/^tls:\/\//);
+  });
+}

@@ -1,0 +1,16 @@
+meta {
+  name: Detection health
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{apiUrl}}/health
+}
+
+tests {
+  test("detection health is ok", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.status).to.equal("ok");
+  });
+}

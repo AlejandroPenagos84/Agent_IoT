@@ -20,14 +20,14 @@ and is split into two modules that do not import each other:
 src/
   detection/                 # always-on: capture, agent, alerts, reports
     domain/                  # Alert, FrameContext, client metadata
-    application/             # Agent use case and its ports
+    application/             # Agent, per-broker worker pool and ports
     infrastructure/
-      tshark/                # capture sidecar and JSONL feature source
-      classifiers/           # TCP, LSTM, XGBoost and hybrid models
-      sinks/                 # MQTT and daily JSONL alert sinks
+      tshark/                # capture sidecar and asyncio socket server
+      classifiers/           # TCP XGBoost model adapter
+      sinks/                 # MQTT, daily JSONL and evidence sinks
       mqtt_client.py         # paho client factory
     reporting/               # ETL: normalize, summaries, report.json, Ollama
-    http/                    # FastAPI report API (/api/v1/reports)
+    http/                    # FastAPI API: reports, brokers, sensors, alerts
     composition_root.py      # wires the agent
   auth/                      # registration, email verification, JWT sessions
     domain/  application/  infrastructure/  http/
@@ -42,13 +42,15 @@ container sets `PYTHONPATH=/app/src`, so modules are imported as
 `detection.…` and `auth.…`.
 
 ```text
-simulation -> Mosquitto -> tshark capture -> features.jsonl
+simulation -> Mosquitto -> tshark capture -> Unix socket (NDJSON)
                                               |
-                                      TsharkFeatureSource
+                                   AsyncSocketServer (asyncio)
+                                              |
+                         BrokerPool: one worker per (tenant, broker)
                                               |
                                       Agent -> Classifier
                                               |
-                              MQTT alert + daily JSONL
+                              MQTT alert + daily JSONL + evidence
                                               |
                                   normalize -> summaries
                                               |
@@ -56,10 +58,19 @@ simulation -> Mosquitto -> tshark capture -> features.jsonl
 ```
 
 In Compose, the capture container shares Mosquitto's network namespace. It
-writes `/capture/features.jsonl` to the `capture-data` volume. The `agente`
-container tails that file, groups frames by connection and direction, and
-publishes alerts to `alertas/deteccion`. Alerts are also written to
-`/alerts/YYYY-MM-DD.jsonl` using UTC dates.
+sends one NDJSON record per frame to `/capture/features.sock` in the
+`capture-data` volume; the `agente` container accepts many capture connections,
+runs one detection worker per broker and publishes alerts to
+`alertas/deteccion`. Alerts are also written to `/alerts/YYYY-MM-DD.jsonl`
+using UTC dates, and the raw frames around each alert are kept under
+`/evidence/YYYY-MM-DD/<alert_id>.jsonl`. The ETL deletes evidence folders older
+than `EVIDENCE_RETENTION_DAYS` (default 30).
+
+The agent accepts up to 10 000 concurrent capture connections with an asyncio
+server and runs one detection worker per `(tenant_id, broker_id)`. Each worker
+has its own bounded queue; when it fills, only that broker's connection is
+backpressured. The pool is capped at 256 workers and evicts workers idle for
+10 minutes.
 
 ## Requirements
 
@@ -70,8 +81,7 @@ publishes alerts to `alertas/deteccion`. Alerts are also written to
 
 The main image uses Python 3.11. Dependencies are listed in
 [`requirements.txt`](requirements.txt). Model artifacts are already exported
-under [`modelos_agente_tcp/`](modelos_agente_tcp/) (TCP model) and
-[`modelos_agente/`](modelos_agente/) (MQTT models); do not edit them manually.
+under [`modelos_agente_tcp/`](modelos_agente_tcp/); do not edit them manually.
 
 ## Quick start with Compose
 
@@ -81,23 +91,44 @@ From the repository root:
 docker compose up --build
 ```
 
-The command starts:
+The command starts the detection stack without Ollama or the simulator:
 
-1. `certgen`, which creates the local Mosquitto TLS certificates if needed.
-2. `mosquitto`, listening on MQTT `1883` and MQTTS `8883`.
-3. `ollama` and `ollama-init`, which download the configured model.
-4. `capture`, `agente`, and the default `simulador`.
-5. `etl`, which periodically normalizes alerts and refreshes summaries.
-6. `report-api`, available on host port `8000`.
+1. `certgen`, which creates the local Mosquitto and agent TLS certificates.
+2. `bootstrap`, which registers the local Mosquitto as a broker, exactly like
+   "Add broker" in the web, and leaves its enrollment key for the local
+   capture. It is idempotent and runs before `capture` and `agente`.
+3. `mosquitto`, listening on MQTT `1883` and MQTTS `8883`.
+4. `report-api`, available on host port `8000`.
+5. `capture` and `agente`. The capture enrolls itself with that key, as a
+   customer installation does, and the agent posts every alert to
+   `/api/v1/alerts`, so the per-broker reports include the simulator traffic.
+6. `etl`, which periodically normalizes alerts and refreshes summaries.
 
-The simulator is configured with `ATAQUE` (`none` or `dos`, default `dos`),
-`DOS_MODE` (`flood` or `persistent`, default `flood`) and `PAQUETES` (default
-`30000`, three flood bursts):
+Set `DEV_TENANT_ID` in `.env` to your user id (`GET /api/v1/auth/me`) so the
+local broker belongs to your account. If it is empty, it is registered under the
+tenant `dev`. Without `AUTH_JWT_SECRET` the agent keeps only the MQTT and JSONL
+sinks. To find the local broker id:
 
 ```bash
-ATAQUE=none PAQUETES=100 docker compose up --build
-DOS_MODE=persistent docker compose up --build
-MODELO=hybrid docker compose up --build
+curl -s http://localhost:8000/api/v1/brokers -H "Authorization: Bearer $ACCESS_TOKEN"
+```
+
+Ollama and the simulator are behind profiles, so they do not slow down or
+generate traffic unless you ask for them.
+
+Run the simulator against the stack:
+
+```bash
+# Normal traffic
+docker compose run --rm --no-deps simulador \
+  -m simulation --broker mosquitto --port 1883 --ataque none --paquetes 100
+
+# DoS traffic
+docker compose run --rm --no-deps simulador \
+  -m simulation --broker mosquitto --port 1883 --ataque dos --paquetes 30000
+
+# Or start the simulator service (default attack mode)
+docker compose --profile simulator up --build
 ```
 
 To watch alerts while the simulator runs:
@@ -146,7 +177,18 @@ docker compose up --build
 
 ## Simulator
 
-Run the simulator inside Compose or locally against a reachable broker:
+The `simulador` service is behind the `simulator` profile, so `docker compose up`
+does not start it. Run it on demand:
+
+```bash
+docker compose run --rm --no-deps simulador \
+  -m simulation --broker mosquitto --port 1883 --ataque dos --paquetes 500
+
+# Or start the service with the profile
+docker compose --profile simulator up --build
+```
+
+You can also run it locally against a reachable broker:
 
 ```bash
 python -m simulation --broker localhost --port 1883 \
@@ -162,18 +204,9 @@ scenario behavior and all options.
 
 ## Choosing and running the detector
 
-Compose uses the TCP model by default (`MODELO=tcp`, artifacts in
-`modelos_agente_tcp/`). Valid values are `tcp`, `lstm`, `hybrid`, and
-`xgboost`; the last three load `modelos_agente/`:
-
-```bash
-MODELO=hybrid docker compose up --build
-```
-
-The TCP model only uses transport features, so it also works when MQTT runs
-over TLS on port `8883`, as long as the capture sees the broker's packets. The
-MQTT models (`lstm`, `hybrid`, `xgboost`) need decoded MQTT fields and only
-work on plaintext traffic.
+Compose uses the TCP model only (artifacts in `modelos_agente_tcp/`). It uses
+transport features, so it also works when MQTT runs over TLS on port `8883`,
+as long as the capture sees the broker's packets.
 
 The detector does not require Ollama. It can capture, classify, and persist
 alerts while Ollama is stopped. Ollama is used only for natural-language
@@ -185,39 +218,67 @@ separate terminals:
 ```bash
 python -m detection.infrastructure.tshark.stream_features \
   --iface eth0 --filter "" \
-  --exclude-topic alertas/deteccion --out /tmp/features.jsonl
+  --exclude-topic alertas/deteccion --endpoint unix:///tmp/features.sock
 
 python -c "from detection.composition_root import AgentConfig, build_agent; \
-build_agent(AgentConfig(capture_path='/tmp/features.jsonl', \
-model_dir='modelos_agente_tcp', model='tcp', broker_host='localhost', \
-alert_dir='/tmp/alerts')).run()"
+build_agent(AgentConfig(capture_endpoint='unix:///tmp/features.sock', \
+model_dir='modelos_agente_tcp', broker_host='localhost', \
+alert_dir='/tmp/alerts', evidence_dir='/tmp/evidence')).run()"
 
 python -m simulation --broker localhost --port 1883 \
   --paquetes 30000 --ataque dos
 ```
 
+## Production and customer installation
+
+The step-by-step guide is in [`docs/instalacion.md`](docs/instalacion.md). In
+short:
+
+1. The central runs `docker-compose.yml` plus `docker-compose.prod.yml`:
+   Caddy terminates HTTPS with Let's Encrypt for `API_DOMAIN`, and the agent
+   listens on TLS `8443` with the certificate of `AGENT_DOMAIN`, reloaded when
+   Caddy renews it.
+2. The user adds a broker in the web (`POST /api/v1/brokers`). The response has
+   an `enrollment_key` and an `install_command`, shown once.
+3. The customer pastes the command next to their Mosquitto. The capture enrolls
+   with the key (`POST /api/v1/sensors/enroll`), stores its identity in the
+   `/state` volume and connects to the agent over TLS with a sensor JWT.
+4. Every 60 s the capture calls `POST /api/v1/sensors/token/refresh` with its
+   sensor secret. This is the heartbeat behind the broker `status`
+   (`pending`, `connected`, `offline`) and renews the 24-hour token.
+5. `POST /api/v1/brokers/{id}/enrollment-key` rotates the key. The installed
+   capture is revoked: it can no longer refresh and the agent closes its
+   connection when the current token expires.
+
+Each broker has one capture. Reinstalling with the same key keeps the sensor id
+and replaces its credentials. The customer side only opens outbound connections
+to ports `443` and `8443`.
+
+The agent mints and renews its own API token from `AUTH_JWT_SECRET`; set
+`ALERT_API_TOKEN` only to use a fixed token. Tokens and keys are never logged,
+and only SHA-256 hashes of enrollment keys and sensor secrets are stored.
+
 ## Ollama
 
-Compose exposes Ollama on host port `11435` by default and containers reach it
-at `http://ollama:11434`. The default model is `gemma3:4b` and is stored in the
-persistent `ollama-data` volume:
+Ollama is optional and lives behind the `ollama` profile. Detection and the
+broker/sensor/alert API work without it; only `/api/v1/reports` needs Ollama.
+Start it explicitly:
 
 ```bash
-OLLAMA_MODEL=gemma3:4b docker compose up --build -d
+OLLAMA_MODEL=gemma3:4b docker compose --profile ollama up -d --build
 curl http://localhost:11435/api/tags
-docker compose exec ollama ollama list
+docker compose --profile ollama exec ollama ollama list
 ```
 
 Use another model or host port with:
 
 ```bash
 OLLAMA_MODEL=llama3.2:3b OLLAMA_PORT=11436 \
-  docker compose up --build -d
+  docker compose --profile ollama up -d --build
 ```
 
-The initializer pulls the selected model before `natural-report` and
-`report-api` start. If Ollama cannot be reached, detection continues, while a
-natural-report request fails explicitly.
+The initializer pulls the selected model before `natural-report` runs. If Ollama
+is not started, detection continues and `/api/v1/reports` returns `502`.
 
 ## ETL and analytical summaries
 
@@ -234,6 +295,14 @@ the output timezone with `REPORT_TIMEZONE`, for example:
 
 ```bash
 REPORT_TIMEZONE=America/Bogota docker compose up -d
+```
+
+Each ETL cycle also prunes evidence folders by UTC date. Set
+`EVIDENCE_RETENTION_DAYS` (default 30) and optionally `ALERT_RETENTION_DAYS`
+(default 0, disabled) to delete old daily alert files after they are normalized:
+
+```bash
+EVIDENCE_RETENTION_DAYS=15 ALERT_RETENTION_DAYS=90 docker compose up -d
 ```
 
 Run the ETL stages manually:
@@ -398,33 +467,115 @@ docker compose --profile etl run --rm --entrypoint python report \
 
 ## REST API
 
-The API is served by `report-api` on `http://localhost:8000`. It reads the
-`/processed/report.json` generated by the ETL and asks Ollama for the
-natural-language report:
+The API is served by `report-api` on `http://localhost:8000`. Reports are
+built per tenant from the alerts stored in `DETECTION_DB_PATH`, so every
+report endpoint requires the user access token and only covers the caller's
+alerts. Pass `broker_id` to limit the report to one of the caller's brokers:
 
 ```bash
 curl http://localhost:8000/health
+
+# Analytical JSON (no Ollama needed)
+curl "http://localhost:8000/api/v1/reports/analytics?broker_id=$BROKER_ID" \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+
+# Natural-language report generated by Ollama
 curl -X POST http://localhost:8000/api/v1/reports \
-  -H 'Content-Type: application/json' -d '{}'
+  -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"broker_id":"'$BROKER_ID'"}'
 ```
 
-Response shape:
+Response shape of `POST /api/v1/reports`:
 
 ```json
 {"report":"## Summary\n..."}
 ```
 
-The request body is optional. It can specify a model and a timezone-aware UTC
-reference timestamp:
+The JSON report has the same shape as `report.json`, plus `scope`
+(`tenant_id`, `broker_id`, `broker_name`) and `brokers`, the alert count per
+broker in the selected period. The request body is optional. It can specify
+`broker_id`, a model and a timezone-aware reference timestamp:
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/reports \
-  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
   -d '{"model":"gemma3:4b","now":"2026-11-07T12:00:00Z"}'
 ```
 
-The API returns `404` when summaries are unavailable, `400` for an invalid
-timestamp, and `502` when Ollama cannot generate the report.
+Reports cover the 24 hours before `now`. When that window has no alerts, the
+report uses the 24 hours ending at the caller's latest alert and sets
+`period.historical_fallback`. The API returns `401` without a valid token,
+`404` when the broker is not the caller's or there are no alerts, `400` for an
+invalid timestamp, and `502` when Ollama cannot generate the report. The
+global `/processed/report.json` written by the ETL is still produced for the
+CLI, but the API no longer serves it.
+
+### Brokers, sensors and alerts
+
+The same FastAPI app stores the broker/sensor registry and the alerts in
+`DETECTION_DB_PATH` (SQLite). User endpoints require the access token issued by
+the auth service (`Authorization: Bearer <access_token>`); the tenant is the
+token `sub`.
+
+```bash
+# Register a broker: returns enrollment_key and install_command (shown once)
+curl -X POST http://localhost:8000/api/v1/brokers \
+  -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"bodega","host":"mqtt.example.com","port":1883}'
+
+# Broker status: pending, connected or offline
+curl http://localhost:8000/api/v1/brokers/$BROKER_ID \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+
+# New key (the installed capture is revoked)
+curl -X POST http://localhost:8000/api/v1/brokers/$BROKER_ID/enrollment-key \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+
+# The capture container calls these itself
+curl -X POST http://localhost:8000/api/v1/sensors/enroll \
+  -H 'Content-Type: application/json' -d '{"enrollment_key":"ek_..."}'
+curl -X POST http://localhost:8000/api/v1/sensors/token/refresh \
+  -H "Authorization: Bearer $SENSOR_SECRET"
+
+# Alerts can be posted with a sensor or agent token
+curl -X POST http://localhost:8000/api/v1/alerts \
+  -H "Authorization: Bearer $SENSOR_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"alert_id":"a-1","ts":1800000000,"kind":"class","label":"ataque"}'
+
+# Delete a broker; its sensors cascade, alerts are kept
+curl -X DELETE http://localhost:8000/api/v1/brokers/$BROKER_ID \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+```
+
+`GET /api/v1/alerts` returns only the caller's alerts, newest first. It accepts
+`limit` (1-1000), `broker_id`, `sensor_id`, `since` (inclusive) and `until`
+(exclusive); the time filters take epoch seconds or ISO-8601 with a timezone,
+for example `?since=2026-11-08T00:00:00Z&until=2026-11-09T00:00:00Z`.
+`POST /api/v1/alerts` also
+appends the alert to `/alerts/YYYY-MM-DD.jsonl`, so the existing ETL and reports
+keep working. `DELETE /api/v1/brokers/{id}` removes the broker and its sensor
+(cascade) but keeps its alerts for auditing. With `ENROLL_KEY` the capture
+takes its tenant, broker and sensor ids from the enrollment; without it, it
+reads `TENANT_ID`, `BROKER_ID` and `SENSOR_ID` (or the matching flags).
+`POST /brokers/{id}/sensors` and `POST /sensors/{id}/token` remain for
+administration; a broker accepts a single sensor (`409` otherwise).
+
+### Bruno collection
+
+Manual API tests live in [`bruno/AgentIoT/`](bruno/AgentIoT/). Open that folder in
+Bruno, select the `Local` environment and run the folders in order. The
+collection registers a user, creates a broker and sensor, issues tokens, ingests
+alerts, checks idempotency and tenant isolation, and deletes the broker while
+keeping its alerts. Tokens are secret environment variables and are not stored
+in the repository.
+
+From the terminal, run the CLI from the collection root (or use the wrapper,
+which handles the `cd`):
+
+```bash
+./bruno/run.sh --env Local
+./bruno/run.sh 01-auth --env Local
+```
 
 ## Models, data, and limitations
 
@@ -437,10 +588,9 @@ The notebooks live in [`ML_Model/`](ML_Model/):
 - `03_modelo_tcp.ipynb` trains the TCP model and exports
   [`modelos_agente_tcp/`](modelos_agente_tcp/).
 
-The MQTT artifacts in [`modelos_agente/`](modelos_agente/) come from the earlier
-notebook, kept in `ML_Model/backup/`. In every case the feature order is defined
-by `pipeline_config.json`; changing features requires retraining and
-re-exporting. No model uses raw application payloads as features.
+The feature order is defined by `pipeline_config.json`; changing features
+requires retraining and re-exporting. No model uses raw application payloads as
+features.
 
 The TCP model was trained with a single DoS capture, a flood of new
 connections, and relies heavily on `tcp_new_conns_5s`. With `--dos-mode

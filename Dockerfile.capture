@@ -11,7 +11,9 @@ WORKDIR /app
 # Solo el recolector: sin numpy, pandas ni el resto del agente.
 COPY src/detection/__init__.py /app/src/detection/__init__.py
 COPY src/detection/infrastructure/__init__.py /app/src/detection/infrastructure/__init__.py
-COPY src/detection/infrastructure/tshark/__init__.py src/detection/infrastructure/tshark/stream_features.py src/detection/infrastructure/tshark/tshark_schema.py src/detection/infrastructure/tshark/tcp_window_features.py /app/src/detection/infrastructure/tshark/
+COPY src/detection/infrastructure/tshark/__init__.py src/detection/infrastructure/tshark/stream_features.py src/detection/infrastructure/tshark/tshark_schema.py src/detection/infrastructure/tshark/tcp_window_features.py src/detection/infrastructure/tshark/socket_sender.py src/detection/infrastructure/tshark/enrollment.py /app/src/detection/infrastructure/tshark/
 
 ENTRYPOINT ["python", "-m", "detection.infrastructure.tshark.stream_features"]
-CMD ["--iface", "eth0", "--out", "/capture/features.jsonl"]
+# Con ENROLL_KEY y API_URL se inscribe sola y usa el agente que indica la API.
+VOLUME ["/state"]
+CMD ["--iface", "eth0", "--exclude-topic", "alertas/deteccion"]

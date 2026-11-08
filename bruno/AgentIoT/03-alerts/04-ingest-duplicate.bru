@@ -1,0 +1,33 @@
+meta {
+  name: Duplicate alert is idempotent
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{apiUrl}}/api/v1/alerts
+}
+
+headers {
+  Content-Type: application/json
+  Authorization: Bearer {{sensorToken}}
+}
+
+body {
+  {
+    "alert_id": "{{alertId}}",
+    "ts": 1800000000,
+    "kind": "class",
+    "label": "ataque",
+    "tenant_id": "{{tenantId}}",
+    "broker_id": "{{brokerId}}",
+    "sensor_id": "{{sensorId}}"
+  }
+}
+
+tests {
+  test("duplicate alert is not stored again", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body.stored).to.equal(false);
+  });
+}

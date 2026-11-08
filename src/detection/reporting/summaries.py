@@ -178,28 +178,50 @@ def _file_fingerprint(path: Path) -> str:
     return digest.hexdigest()
 
 
+def prepare_alert_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """Validate normalized alerts, deduplicate them, and parse ``ts_utc``."""
+    missing = REQUIRED_COLUMNS - set(frame.columns)
+    if missing:
+        raise ValueError(f"Normalized alerts are missing columns: {sorted(missing)}")
+    if frame.empty:
+        raise ValueError("Normalized alerts contain no rows")
+    frame = frame.drop_duplicates("alert_id").copy()
+    frame["ts"] = pd.to_datetime(frame["ts_utc"], utc=True, errors="coerce")
+    frame = frame.dropna(subset=["ts"])
+    if frame.empty:
+        raise ValueError("Normalized alerts contain no valid timestamps")
+    for column in ("client_id", "ip", "topic", "source"):
+        if column not in frame:
+            frame[column] = pd.NA
+    return frame.sort_values("ts")
+
+
+def summarize_frame(
+    frame: pd.DataFrame, source: str, invalid_records: int = 0
+) -> dict[str, pd.DataFrame]:
+    """Return every summary table for an already prepared alert frame."""
+    return {
+        "runs": _run_summary(frame, source, invalid_records),
+        "clients": _entity_summary(frame, "client_id", source),
+        "ips": _entity_summary(frame, "ip", source),
+        "topics": _entity_summary(frame, "topic", source),
+        "temporal": _temporal_summary(frame, source),
+    }
+
+
 def build_summaries(input_path: str | Path, output_dir: str | Path) -> dict[str, Any]:
     """Create all summary Parquets and update the processing checkpoint."""
     input_file = Path(input_path)
     destination = Path(output_dir)
     if not input_file.is_file():
         raise FileNotFoundError(f"Normalized Parquet does not exist: {input_file}")
-    frame = pd.read_parquet(input_file, engine="pyarrow")
-    missing = REQUIRED_COLUMNS - set(frame.columns)
+    raw = pd.read_parquet(input_file, engine="pyarrow")
+    missing = REQUIRED_COLUMNS - set(raw.columns)
     if missing:
         raise ValueError(f"Normalized Parquet is missing columns: {sorted(missing)}")
-    if frame.empty:
+    if raw.empty:
         raise ValueError("Normalized Parquet contains no alerts")
-
-    frame = frame.drop_duplicates("alert_id").copy()
-    frame["ts"] = pd.to_datetime(frame["ts_utc"], utc=True, errors="coerce")
-    frame = frame.dropna(subset=["ts"])
-    if frame.empty:
-        raise ValueError("Normalized Parquet contains no valid timestamps")
-    for column in ("client_id", "ip", "topic", "source"):
-        if column not in frame:
-            frame[column] = pd.NA
-    frame = frame.sort_values("ts")
+    frame = prepare_alert_frame(raw)
     source = _source_partition(input_file)
     report_path = input_file.parent / "processing_report.json"
     invalid_records = 0
@@ -207,13 +229,7 @@ def build_summaries(input_path: str | Path, output_dir: str | Path) -> dict[str,
         report = json.loads(report_path.read_text(encoding="utf-8"))
         invalid_records = int(report.get("invalid_records", 0))
 
-    outputs = {
-        "runs": _run_summary(frame, source, invalid_records),
-        "clients": _entity_summary(frame, "client_id", source),
-        "ips": _entity_summary(frame, "ip", source),
-        "topics": _entity_summary(frame, "topic", source),
-        "temporal": _temporal_summary(frame, source),
-    }
+    outputs = summarize_frame(frame, source, invalid_records)
     for summary_type, summary_frame in outputs.items():
         _atomic_parquet(summary_frame, destination / summary_type / "summary.parquet")
 

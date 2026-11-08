@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import uuid
 from collections import deque
 from typing import Sequence
 
 from detection.application.ports.ports_out import Classifier, FeatureSource
-from detection.application.ports.ports_out import AlertSink
+from detection.application.ports.ports_out import AlertSink, EvidenceSink
 from detection.domain.model import ALERT_KIND_CLASS, Alert, FrameContext
 
 DEFAULT_WINDOW = 11
 DEFAULT_NORMAL_LABELS = ('normal',)
+DEFAULT_EVIDENCE_SECONDS = 30.0
+MAX_EVIDENCE_FLOWS = 4096
+MAX_EVIDENCE_RECORDS = 10_000
 
 
 '''
@@ -26,7 +30,9 @@ class Agent:
                  source_name: str = 'agente',
                  per_flow: bool = True,
                  alert_cooldown: float = 0.0,
-                 server_ports: Sequence[int] = ()):
+                 server_ports: Sequence[int] = (),
+                 evidence_sink: EvidenceSink | None = None,
+                 evidence_seconds: float = DEFAULT_EVIDENCE_SECONDS):
         """Create the use case with its driven ports injected."""
         self.source = source
         self.classifier = classifier
@@ -41,7 +47,10 @@ class Agent:
         # Puertos del servidor (broker): la alerta reporta al cliente, no al broker,
         # aunque el frame sea una respuesta broker -> cliente.
         self.server_ports = set(server_ports)
+        self.evidence_sink = evidence_sink
+        self.evidence_seconds = evidence_seconds
         self._last_alert: dict = {}
+        self._evidence: dict = {}
         self.emitted = 0
 
     def _emit(self, label: str, context: FrameContext) -> None:
@@ -49,18 +58,56 @@ class Agent:
         ip = context.ip
         if context.srcport in self.server_ports and context.dst_ip:
             ip = context.dst_ip
-        self.sink.emit(Alert(
+        alert = Alert(
             ts=context.ts or 0.0, kind=ALERT_KIND_CLASS, label=label,
             client_id=context.client_id, ip=ip,
-            topic=context.topic, source=self.source_name))
+            topic=context.topic, source=self.source_name,
+            alert_id=str(uuid.uuid4()),
+            tenant_id=context.tenant_id, broker_id=context.broker_id,
+            sensor_id=context.sensor_id)
+        self.sink.emit(alert)
+        self._write_evidence(alert, context)
         self.emitted += 1
+
+    def _remember_evidence(self, context: FrameContext, record: dict | None) -> None:
+        """Keep the raw frames of the last seconds for the connection."""
+        if self.evidence_sink is None or record is None:
+            return
+        key = self._connection_key(context)
+        buffer = self._evidence.get(key)
+        if buffer is None:
+            if len(self._evidence) >= MAX_EVIDENCE_FLOWS:
+                self._evidence.pop(next(iter(self._evidence)))
+            buffer = self._evidence[key] = deque(maxlen=MAX_EVIDENCE_RECORDS)
+        ts = context.ts
+        if ts is not None:
+            cutoff = ts - self.evidence_seconds
+            while buffer and buffer[0][0] is not None and buffer[0][0] < cutoff:
+                buffer.popleft()
+        buffer.append((ts, record))
+
+    def _write_evidence(self, alert: Alert, context: FrameContext) -> None:
+        """Persist the buffered frames for the connection that raised the alert."""
+        if self.evidence_sink is None:
+            return
+        key = self._connection_key(context)
+        buffer = self._evidence.get(key)
+        if not buffer:
+            return
+        cutoff = (context.ts - self.evidence_seconds
+                  if context.ts is not None else None)
+        records = [record for ts, record in buffer
+                   if cutoff is None or ts is None or ts >= cutoff]
+        if records:
+            self.evidence_sink.write(alert, key, records)
 
     @staticmethod
     def _connection_key(context: FrameContext):
-        """Both directions of one TCP connection share the cooldown."""
+        """One TCP connection is isolated per tenant, broker and sensor."""
         endpoints = tuple(sorted(((str(context.ip), context.srcport),
                                   (str(context.dst_ip), context.dstport))))
-        return context.stream_id, endpoints
+        identity = (context.tenant_id, context.broker_id, context.sensor_id)
+        return identity, context.stream_id, endpoints
 
     def _cooling_down(self, key, label: str, context: FrameContext) -> bool:
         """True if this connection already raised ``label`` within the cooldown.
@@ -93,6 +140,7 @@ class Agent:
         if not self.per_flow:
             buffer: deque = deque(maxlen=self.window_size)
             for frame in self.source.rows():
+                self._remember_evidence(frame.context, frame.record)
                 buffer.append(frame.features)
                 if len(buffer) < self.window_size:
                     continue
@@ -107,7 +155,9 @@ class Agent:
             if (not context.ip or not context.dst_ip
                     or not context.srcport or not context.dstport):
                 continue
-            key = (context.stream_id, context.ip, context.srcport,
+            self._remember_evidence(context, frame.record)
+            key = (context.tenant_id, context.broker_id, context.sensor_id,
+                   context.stream_id, context.ip, context.srcport,
                    context.dst_ip, context.dstport)
             buf = buffers.get(key)
             if buf is None:

@@ -1,0 +1,24 @@
+meta {
+  name: Rotate enrollment key (lost or leaked key)
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{apiUrl}}/api/v1/brokers/{{brokerId}}/enrollment-key
+}
+
+headers {
+  Authorization: Bearer {{accessToken}}
+}
+
+script:post-response {
+  bru.setVar("enrollmentKey", res.body.enrollment_key);
+}
+
+tests {
+  test("a new key replaces the old one", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.enrollment_key).to.match(/^ek_/);
+  });
+}
