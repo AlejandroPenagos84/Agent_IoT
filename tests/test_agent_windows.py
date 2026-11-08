@@ -26,7 +26,7 @@ class Recorder(Classifier):
 
     def predict(self, window):
         self.windows.append(window)
-        return ['intrusion']
+        return ['ataque']
 
 
 class Sink(AlertSink):

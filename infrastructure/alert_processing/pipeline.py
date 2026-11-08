@@ -15,7 +15,7 @@ REQUIRED_FIELDS = ('ts', 'kind', 'label')
 OPTIONAL_FIELDS = (
     'alert_id', 'run_id', 'client_id', 'ip', 'topic', 'mse', 'source')
 KNOWN_KINDS = frozenset({'class'})
-KNOWN_SOURCES = frozenset({'tshark', 'mqtt', 'classifier', 'agente'})
+KNOWN_SOURCES = frozenset({'tshark', 'tshark-tcp', 'mqtt', 'classifier', 'agente'})
 _SPACE_RE = re.compile(r'\s+')
 
 

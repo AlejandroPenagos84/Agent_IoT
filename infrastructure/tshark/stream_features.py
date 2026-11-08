@@ -5,7 +5,9 @@ writes one JSON line per MQTT frame; the agent consumes it through
 `TsharkFeatureSource`.
 
 It emits the network fields required by `TsharkFeatureSource` plus frame context
-(`frame.time_epoch`, `ip.src`, `mqtt.topic`, and ports).
+(`frame.time_epoch`, `ip.src`, `mqtt.topic`, and ports). Each record also carries
+`tcp_features`: the 12 causal TCP features of model B (`tcp_window_features`), or
+`null` when the frame has no 1883/8883 port (outside the model's training scope).
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ import os
 import shutil
 import subprocess
 import sys
+from .tcp_window_features import TcpWindowFeatures
 from .tshark_schema import CAPTURE_FIELDS
 
 # Must match tshark_schema.FEATURE_COLUMNS plus source context fields.
@@ -111,6 +114,7 @@ def stream(args) -> int:
 
     try:
         excluded_streams = set()
+        tcp_features = TcpWindowFeatures()
         with open(args.out, 'a', encoding='utf-8') as out:
             assert proc.stdout is not None
             for line in proc.stdout:
@@ -123,6 +127,8 @@ def stream(args) -> int:
                     excluded_streams.add(stream_id)
                 if stream_id is not None and stream_id in excluded_streams:
                     continue
+                # Después de las exclusiones: el tráfico del agente no entra a las ventanas.
+                record['tcp_features'] = tcp_features.update(record)
                 out.write(json.dumps(record, ensure_ascii=False) + '\n')
                 out.flush()
     except KeyboardInterrupt:

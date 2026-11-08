@@ -1,0 +1,54 @@
+{
+  "dataset": "MQTT_UAD/DoS.csv",
+  "task": "dos_binary",
+  "positive_class": "DoS",
+  "feature_mode": "tcp",
+  "feature_columns_tcp": [
+    "frame.len",
+    "fe_log_len",
+    "frame.time_delta",
+    "fe_is_standard_mqtt_port",
+    "fe_is_broker_to_client",
+    "tcp_iat",
+    "tcp_iat_std_5s",
+    "tcp_frames_5s",
+    "tcp_bytes_5s",
+    "tcp_len_std_5s",
+    "tcp_asymmetry_5s",
+    "tcp_new_conns_5s"
+  ],
+  "class_names": [
+    "normal",
+    "ataque"
+  ],
+  "normal_idx": 0,
+  "model_file": "xgb_tcp.ubj",
+  "window_size": 11,
+  "seq_len": 10,
+  "nan_fill": 0.0,
+  "tcp_window_seconds": 5.0,
+  "tcp_window_causal": true,
+  "mqtt_ports": [
+    1883,
+    8883
+  ],
+  "split_strategy": "grouped_by_connection",
+  "cv_folds": 5,
+  "seed": 42,
+  "hyperparameters": {
+    "n_estimators": 300,
+    "learning_rate": 0.05,
+    "max_depth": 4,
+    "min_child_weight": 2.0,
+    "subsample": 0.9,
+    "colsample_bytree": 0.9,
+    "reg_lambda": 1.0,
+    "objective": "binary:logistic",
+    "tree_method": "hist",
+    "eval_metric": "logloss",
+    "n_jobs": -1
+  },
+  "training_scope": "mqtt_ports",
+  "classify_only_mqtt_ports": true,
+  "trained_on": "frames con puerto 1883/8883 de DoS.csv + normal de MitM.csv e Intrusion.csv"
+}

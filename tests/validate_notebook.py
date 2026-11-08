@@ -26,7 +26,7 @@ def main():
             source = ''.join(cell['source'])
             if args.prepare and source.startswith('model_xgb ='):
                 break
-            for name in ('DoS', 'MitM', 'Intrusion'):
+            for name in ('DoS',):
                 source = source.replace(
                     f'/kaggle/input/datasets/alejandropenagos79/dataset/{name}.csv',
                     str(root / 'dataset' / f'{name}.csv'))
@@ -72,7 +72,7 @@ def main():
             for mode in ('xgboost', 'lstm', 'hybrid'):
                 agent = build_agent(AgentConfig(model_dir=output, model=mode))
                 labels = agent.classifier.predict(window)
-                assert labels and labels[-1] in ('normal', 'ataque', 'DoS', 'mitm', 'intrusion')
+                assert labels and labels[-1] in ('normal', 'ataque')
                 if mode == 'xgboost':
                     expected = namespace['model_xgb'].predict(features.iloc[[end]])[0]
                     assert labels[-1] == namespace['le_binary'].inverse_transform([expected])[0]

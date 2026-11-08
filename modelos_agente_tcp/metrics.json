@@ -1,0 +1,360 @@
+{
+  "training_scope": "mqtt_ports",
+  "cv": {
+    "n_splits": 5,
+    "folds": {
+      "0": {
+        "macro_f1": 0.994595497371346,
+        "balanced_accuracy": 0.995662514592386,
+        "dos_recall": 0.9959206174200661,
+        "dos_precision": 0.998342175066313,
+        "normal_recall": 0.9954044117647058,
+        "roc_auc": 0.9998692089845861,
+        "fp_DoS": 0.01282051282051282,
+        "fp_Intrusion": 0.0,
+        "fp_MitM": 0.005479452054794521
+      },
+      "1": {
+        "macro_f1": 0.9965701514124441,
+        "balanced_accuracy": 0.9975919195127245,
+        "dos_recall": 0.9970215113072256,
+        "dos_precision": 0.9993365767359575,
+        "normal_recall": 0.9981623277182236,
+        "roc_auc": 0.9999404336048396,
+        "fp_DoS": 0.043010752688172046,
+        "fp_Intrusion": 0.000655307994757536,
+        "fp_MitM": 0.0
+      },
+      "2": {
+        "macro_f1": 0.9957328455948753,
+        "balanced_accuracy": 0.9960728581818059,
+        "dos_recall": 0.9973524544953116,
+        "dos_precision": 0.9981232060057408,
+        "normal_recall": 0.9947932618683002,
+        "roc_auc": 0.9999191309320384,
+        "fp_DoS": 0.01809954751131222,
+        "fp_Intrusion": 0.0026761819803746653,
+        "fp_MitM": 0.005200208008320333
+      },
+      "3": {
+        "macro_f1": 0.9970867855550571,
+        "balanced_accuracy": 0.9974762457572361,
+        "dos_recall": 0.9980143408714838,
+        "dos_precision": 0.9988958816385116,
+        "normal_recall": 0.9969381506429884,
+        "roc_auc": 0.9999270087538831,
+        "fp_DoS": 0.026706231454005934,
+        "fp_Intrusion": 0.00047778308647873863,
+        "fp_MitM": 0.0
+      },
+      "4": {
+        "macro_f1": 0.9969822706406131,
+        "balanced_accuracy": 0.9975181795691249,
+        "dos_recall": 0.9977937120794264,
+        "dos_precision": 0.9990059642147118,
+        "normal_recall": 0.9972426470588235,
+        "roc_auc": 0.9999218268388437,
+        "fp_DoS": 0.07142857142857142,
+        "fp_Intrusion": 0.0016835016835016834,
+        "fp_MitM": 0.0007733952049497294
+      }
+    },
+    "mean": {
+      "macro_f1": 0.996193510114867,
+      "balanced_accuracy": 0.9968643435226555,
+      "dos_recall": 0.9972205272347028,
+      "dos_precision": 0.9987407607322469,
+      "normal_recall": 0.9965081598106084,
+      "roc_auc": 0.9999155218228382,
+      "fp_DoS": 0.034413123180514885,
+      "fp_Intrusion": 0.0010985549490225247,
+      "fp_MitM": 0.0022906110536129167
+    },
+    "std": {
+      "macro_f1": 0.001040168180451766,
+      "balanced_accuracy": 0.0009222438077977344,
+      "dos_recall": 0.000822413920089874,
+      "dos_precision": 0.0004974023688794782,
+      "normal_recall": 0.0013801965260128665,
+      "roc_auc": 2.7157891810354593e-05,
+      "fp_DoS": 0.02364229470415938,
+      "fp_Intrusion": 0.0010746764950490858,
+      "fp_MitM": 0.002803132323801432
+    }
+  },
+  "oof": {
+    "B (vista mqtt)": {
+      "frames": 61654.0,
+      "DoS": 45330.0,
+      "macro_f1": 0.9961932547007502,
+      "balanced_accuracy": 0.9968642963120568,
+      "dos_recall": 0.9972203838517538,
+      "dos_precision": 0.99874063763505,
+      "normal_recall": 0.9965082087723597,
+      "roc_auc": 0.999912727855456,
+      "fp_DoS": 0.026831785345717233,
+      "fp_Intrusion": 0.0009090909090909091,
+      "fp_MitM": 0.0031352057478772045
+    }
+  },
+  "importance": {
+    "frame.len": 0.22239720821380615,
+    "fe_log_len": 0.02201925590634346,
+    "frame.time_delta": 0.0213669054210186,
+    "fe_is_standard_mqtt_port": 0.0,
+    "fe_is_broker_to_client": 0.009041142649948597,
+    "tcp_iat": 0.009425235912203789,
+    "tcp_iat_std_5s": 0.012354942038655281,
+    "tcp_frames_5s": 0.005892413668334484,
+    "tcp_bytes_5s": 0.036288075149059296,
+    "tcp_len_std_5s": 0.0961550921201706,
+    "tcp_asymmetry_5s": 0.0205867700278759,
+    "tcp_new_conns_5s": 0.5444729328155518
+  },
+  "ablation_scope": {
+    "means": {
+      "A": {
+        "macro_f1": 0.9777740481883059,
+        "balanced_accuracy": 0.9835599213080808,
+        "roc_auc": 0.9986760033610507,
+        "dos_recall": 0.981270914277687,
+        "dos_precision": 0.9948344053172148,
+        "normal_recall": 0.9858489283384744,
+        "fp_DoS": 0.08807115206053263,
+        "fp_Intrusion": 0.011359065278919304,
+        "fp_MitM": 0.010706083979032277
+      },
+      "B": {
+        "macro_f1": 0.9961935101148672,
+        "balanced_accuracy": 0.9968643435226555,
+        "roc_auc": 0.9999155218228382,
+        "dos_recall": 0.9972205272347028,
+        "dos_precision": 0.9987407607322469,
+        "normal_recall": 0.9965081598106084,
+        "fp_DoS": 0.034413123180514885,
+        "fp_Intrusion": 0.0010985549490225247,
+        "fp_MitM": 0.0022906110536129167
+      },
+      "B sin tcp_new_conns_5s": {
+        "macro_f1": 0.9910477299555096,
+        "balanced_accuracy": 0.9924235760163598,
+        "roc_auc": 0.9996226814353321,
+        "dos_recall": 0.9936688050469747,
+        "dos_precision": 0.9968139752064072,
+        "normal_recall": 0.9911783469857447,
+        "fp_DoS": 0.07152299124213381,
+        "fp_Intrusion": 0.008401469820161179,
+        "fp_MitM": 0.00586655526137402
+      },
+      "B sin tcp_new_conns_5s y tcp_asymmetry_5s": {
+        "macro_f1": 0.9862119737228193,
+        "balanced_accuracy": 0.9892043610866024,
+        "roc_auc": 0.9993320205698311,
+        "dos_recall": 0.9891905027453932,
+        "dos_precision": 0.9960901916994468,
+        "normal_recall": 0.9892182194278115,
+        "fp_DoS": 0.07252273149603652,
+        "fp_Intrusion": 0.009303519958515586,
+        "fp_MitM": 0.007169796597761837
+      }
+    },
+    "deltas": {
+      "A": {
+        "macro_f1": 0.9777740481883059,
+        "caída vs B": 0.018419461926561298,
+        "ventaja sobre A": 0.0,
+        "lectura": "comparación (no es ablación)"
+      },
+      "B": {
+        "macro_f1": 0.9961935101148672,
+        "caída vs B": 0.0,
+        "ventaja sobre A": 0.018419461926561298,
+        "lectura": "referencia"
+      },
+      "B sin tcp_new_conns_5s": {
+        "macro_f1": 0.9910477299555096,
+        "caída vs B": 0.005145780159357627,
+        "ventaja sobre A": 0.013273681767203671,
+        "lectura": "robusto: la señal está repartida"
+      },
+      "B sin tcp_new_conns_5s y tcp_asymmetry_5s": {
+        "macro_f1": 0.9862119737228193,
+        "caída vs B": 0.009981536392047907,
+        "ventaja sobre A": 0.00843792553451339,
+        "lectura": "robusto: la señal está repartida"
+      }
+    }
+  },
+  "ablation_full_reference": {
+    "n_splits": 5,
+    "means": {
+      "A": {
+        "macro_f1": 0.9915042924566766,
+        "balanced_accuracy": 0.9949694895637566,
+        "roc_auc": 0.999278940630856,
+        "dos_recall": 0.9948966124065113,
+        "dos_precision": 0.9773958411506491,
+        "normal_recall": 0.9950423667210023,
+        "fp_DoS": 0.00427466655871995,
+        "fp_Intrusion": 0.006366640542324266,
+        "fp_MitM": 0.004603706856345185
+      },
+      "B": {
+        "macro_f1": 0.998137664829118,
+        "balanced_accuracy": 0.9983829139684556,
+        "roc_auc": 0.9998884185210517,
+        "dos_recall": 0.9975582930048394,
+        "dos_precision": 0.9963108932047005,
+        "normal_recall": 0.9992075349320716,
+        "fp_DoS": 0.0021843540806936114,
+        "fp_Intrusion": 0.0005829864849713744,
+        "fp_MitM": 0.0004858990117073268
+      },
+      "B sin tcp_new_conns_5s": {
+        "macro_f1": 0.9953369095915908,
+        "balanced_accuracy": 0.996551879701974,
+        "roc_auc": 0.9996758487979323,
+        "dos_recall": 0.9954245490541135,
+        "dos_precision": 0.9892551752769556,
+        "normal_recall": 0.9976792103498348,
+        "fp_DoS": 0.0030834584723033074,
+        "fp_Intrusion": 0.003526893803049348,
+        "fp_MitM": 0.0014993894983919254
+      }
+    },
+    "deltas": {
+      "A": {
+        "macro_f1": 0.9915042924566766,
+        "caída vs B": 0.006633372372441437,
+        "ventaja sobre A": 0.0,
+        "lectura": "comparación (no es ablación)"
+      },
+      "B": {
+        "macro_f1": 0.998137664829118,
+        "caída vs B": 0.0,
+        "ventaja sobre A": 0.006633372372441437,
+        "lectura": "referencia"
+      },
+      "B sin tcp_new_conns_5s": {
+        "macro_f1": 0.9953369095915908,
+        "caída vs B": 0.0028007552375272082,
+        "ventaja sobre A": 0.003832617134914229,
+        "lectura": "robusto: la señal está repartida"
+      }
+    }
+  },
+  "univariate_auc": {
+    "tcp_new_conns_5s": {
+      "AUC todo el tráfico": 0.9618785183317211,
+      "dir todo el tráfico": "+",
+      "AUC vista mqtt": 0.9590765550708672,
+      "dir vista mqtt": "+",
+      "caída": 0.0028019632608539125
+    },
+    "tcp_iat": {
+      "AUC todo el tráfico": 0.8622722460434754,
+      "dir todo el tráfico": "-",
+      "AUC vista mqtt": 0.9322478071046744,
+      "dir vista mqtt": "-",
+      "caída": -0.06997556106119895
+    },
+    "frame.len": {
+      "AUC todo el tráfico": 0.710025962419871,
+      "dir todo el tráfico": "+",
+      "AUC vista mqtt": 0.9250790940762593,
+      "dir vista mqtt": "+",
+      "caída": -0.21505313165638829
+    },
+    "fe_log_len": {
+      "AUC todo el tráfico": 0.710025962419871,
+      "dir todo el tráfico": "+",
+      "AUC vista mqtt": 0.9250790940762593,
+      "dir vista mqtt": "+",
+      "caída": -0.21505313165638829
+    },
+    "tcp_bytes_5s": {
+      "AUC todo el tráfico": 0.6304704574476615,
+      "dir todo el tráfico": "+",
+      "AUC vista mqtt": 0.9141620918675663,
+      "dir vista mqtt": "+",
+      "caída": -0.28369163441990475
+    },
+    "tcp_len_std_5s": {
+      "AUC todo el tráfico": 0.69159519396614,
+      "dir todo el tráfico": "+",
+      "AUC vista mqtt": 0.9116940126188343,
+      "dir vista mqtt": "+",
+      "caída": -0.22009881865269432
+    },
+    "frame.time_delta": {
+      "AUC todo el tráfico": 0.6228569029921007,
+      "dir todo el tráfico": "-",
+      "AUC vista mqtt": 0.9089833117134479,
+      "dir vista mqtt": "-",
+      "caída": -0.2861264087213472
+    },
+    "tcp_frames_5s": {
+      "AUC todo el tráfico": 0.5659996294720496,
+      "dir todo el tráfico": "+",
+      "AUC vista mqtt": 0.8831386861185632,
+      "dir vista mqtt": "+",
+      "caída": -0.31713905664651354
+    },
+    "tcp_asymmetry_5s": {
+      "AUC todo el tráfico": 0.9701995247544167,
+      "dir todo el tráfico": "+",
+      "AUC vista mqtt": 0.8292438789020461,
+      "dir vista mqtt": "+",
+      "caída": 0.14095564585237064
+    },
+    "fe_is_broker_to_client": {
+      "AUC todo el tráfico": 0.5336230639224052,
+      "dir todo el tráfico": "+",
+      "AUC vista mqtt": 0.664781810786893,
+      "dir vista mqtt": "-",
+      "caída": -0.1311587468644878
+    },
+    "tcp_iat_std_5s": {
+      "AUC todo el tráfico": 0.5259031485975029,
+      "dir todo el tráfico": "-",
+      "AUC vista mqtt": 0.5350320464325622,
+      "dir vista mqtt": "+",
+      "caída": -0.009128897835059324
+    },
+    "fe_is_standard_mqtt_port": {
+      "AUC todo el tráfico": 0.9600696267603799,
+      "dir todo el tráfico": "+",
+      "AUC vista mqtt": 0.5,
+      "dir vista mqtt": "constante",
+      "caída": 0.4600696267603799
+    }
+  },
+  "training_scope_comparison": {
+    "entrenado con vista mqtt": {
+      "frames": 61654.0,
+      "DoS": 45330.0,
+      "macro_f1": 0.9961932547007502,
+      "balanced_accuracy": 0.9968642963120568,
+      "dos_recall": 0.9972203838517538,
+      "dos_precision": 0.99874063763505,
+      "normal_recall": 0.9965082087723597,
+      "roc_auc": 0.999912727855456,
+      "fp_DoS": 0.026831785345717233,
+      "fp_Intrusion": 0.0009090909090909091,
+      "fp_MitM": 0.0031352057478772045
+    },
+    "entrenado con todo el tráfico": {
+      "frames": 61654.0,
+      "DoS": 45330.0,
+      "macro_f1": 0.9958041924245755,
+      "balanced_accuracy": 0.9947449988710306,
+      "dos_recall": 0.9989852195014339,
+      "dos_precision": 0.9965888333810163,
+      "normal_recall": 0.9905047782406273,
+      "roc_auc": 0.9999146205076302,
+      "fp_DoS": 0.07223942208462332,
+      "fp_Intrusion": 0.005064935064935065,
+      "fp_MitM": 0.006009144350097975
+    }
+  }
+}

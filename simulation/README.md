@@ -4,45 +4,56 @@ The simulator publishes normal and controlled laboratory attack traffic to
 Mosquitto. Capture, feature extraction, and detection are outside this package.
 
 ```bash
-python -m simulation --broker localhost --port 1883 \
-  --paquetes 500 --ataque todos --verbose
-python -m simulation --dry-run --ataque todos --force-attack
+python -m simulation --broker localhost --port 1883 --paquetes 500 --ataque dos --verbose
+python -m simulation --dry-run --ataque dos --force-attack
 ```
 
-## Scenarios and timing
+## Ritmo y escenario
 
-Supported scenarios are `none`, `dos`, `mitm`, `intrusion`, and `todos`.
-`todos` runs `dos`, `mitm`, and `intrusion` in order. It requires
-`--paquetes >= 3 * --burst-size + 2`, because two normal publications are
-reserved for intrusion discovery. `--paquetes` counts MQTT publications, not
-TCP frames or alerts.
+El simulador público genera tráfico normal (`--ataque none`) o ráfagas DoS
+(`--ataque dos`). `--paquetes` cuenta publicaciones MQTT, no frames TCP ni
+alertas. El tráfico normal comparte ese presupuesto.
 
 ```bash
-python -m simulation --broker localhost --ataque todos --paquetes 500 \
-  --burst-size 100 --dos-rate 100 --attack-rate 10 --attack-gap 5 \
+python -m simulation --broker localhost --ataque dos --dos-mode persistent \
+  --paquetes 500 --burst-size 100 --dos-rate 100 --attack-gap 5 \
   --force-attack --seed 42 --verbose
 ```
 
-The scheduler uses `time.monotonic()`. `--intervalo` is the scheduler pause,
-not a clock multiplier. `--dos-rate` and `--attack-rate` are publications per
-second during bursts; operating-system delays can reduce the observed rate.
-Normal traffic pauses during bursts. `--dry-run` uses virtual time and never
-connects to the broker.
+El horario usa `time.monotonic()` y las ráfagas esperan deadlines reales;
+`--intervalo` es la pausa del scheduler, no un multiplicador del reloj.
+`--dos-rate` son publicaciones por segundo; cada ráfaga
+imprime su duración y ritmo observado de envío. La conexión se establece antes
+de medir la ráfaga. Los retrasos del sistema pueden reducir el ritmo real.
+El tráfico normal se pausa durante las ráfagas. `--dry-run` usa tiempo virtual,
+sin esperas ni conexión, y no mide rendimiento de red.
 
-## Scenario behavior
+El escenario genera tráfico real inspirado en MQTT_UAD, sin reproducir
+exactamente la captura histórica. Los dispositivos publican lecturas
+numéricas a `distance/ultrasonic1` y valores `0`/`1` a `light/rele1`, topics
+presentes en el CSV local.
 
-Normal devices publish numeric readings to `distance/ultrasonic1` and `0`/`1`
-values to `light/rele1`, matching topics in the local CSV data.
+- `dos`: por defecto (`--dos-mode flood`) reproduce el patrón de `DoS.csv`
+  (herramienta mqtt-malaria): cada ráfaga abre `--dos-clients` conexiones **nuevas**
+  a la vez (50 por defecto, client_id único por ráfaga), cada una publica su parte de
+  `--burst-size` (10000 por defecto, 200 por cliente) sin pausas a
+  `mqtt-malaria/<cliente>/data/<n>/<total>` y se desconecta. `--dos-rate` no aplica
+  en este modo. `--dos-payload-size` (100) fija el payload hexadecimal.
+- `--dos-mode persistent`: el escenario anterior, con 5 clientes reutilizados y ritmo
+  `--dos-rate`. **Limitación conocida:** el modelo TCP solo vio el flood de conexiones
+  de `DoS.csv`; con clientes persistentes `tcp_new_conns_5s` es 0 y el modelo marca
+  solo ~25 % de los frames del atacante. Se mantiene para documentar ese límite.
+  Generar carga no demuestra por sí sola una denegación de servicio.
 
-- `dos` publishes from multiple clients to `mqtt-malaria/.../data/...`.
-  `--dos-clients` defaults to 5, `--dos-payload-size` to 100 bytes, and
-  `--dos-rate` controls the rate. Generating load alone does not prove a DoS.
-- `mitm` sends `100` through a local TCP proxy that changes the PUBLISH value
-  to `900` while preserving length and framing. It does not perform ARP
-  spoofing and requires plaintext MQTT.
-- `intrusion` subscribes anonymously to `#`, discovers observed topics, and
-  publishes forged values. `--discovery-seconds` controls the discovery wait.
-  The broker configuration determines whether anonymous access is allowed.
+En Compose, `ATAQUE` (`dos`), `DOS_MODE` (`flood`) y `PAQUETES` (`30000`, tres
+ráfagas flood) configuran el simulador. Con `ATAQUE=none` usa un `PAQUETES` pequeño:
+el tráfico normal publica cada ~2-5 s.
+
+La etiqueta del escenario no es ground truth de frames ni una etiqueta ML.
+El simulador no inventa features ni etiquetas de captura; tshark extrae los
+campos del wire. Los modelos MQTT ahora pueden derivar features de aplicación,
+pero reproducir un escenario no garantiza que el modelo lo clasifique igual:
+ritmos, clientes, topología y distribución de mensajes pueden ser diferentes.
 
 Scenario names are not ML ground truth. The simulator creates traffic; `tshark`
 extracts wire features and the classifier produces the final label. Different
@@ -57,12 +68,11 @@ acceptance or consumer delivery.
 
 The main options are `--broker`, `--port`, `--tls`, `--ca-certs`, `--paquetes`,
 `--ataque`, `--intervalo`, `--usuario`, `--usuario-ataque`, `--password`,
-`--force-attack`, `--burst-size`, `--dos-rate`, `--attack-rate`, `--attack-gap`,
-`--seed`, `--dos-clients`, `--dos-payload-size`, `--discovery-seconds`,
-`--verbose`, `--debug`, and `--dry-run`.
+`--force-attack`, `--dos-mode`, `--burst-size`, `--dos-rate`, `--attack-gap`,
+`--seed`, `--dos-clients`, `--dos-payload-size`, `--verbose`, `--debug`, and
+`--dry-run`.
 
-TLS uses port `8883` and the generated CA certificate. MitM and `todos` reject
-TLS because the laboratory proxy must inspect the MQTT stream.
+TLS uses port `8883` and the generated CA certificate.
 
 ## Implementation
 
@@ -71,10 +81,13 @@ TLS because the laboratory proxy must inspect the MQTT stream.
 | `devices.py` | Device definitions, topics, payloads, and intervals. |
 | `publishers.py` | Publisher port and MQTT/no-op implementations. |
 | `attacks.py` | Immutable attack packet descriptions and scenario builders. |
-| `mqtt_proxy.py` | TCP PUBLISH transformer, handler, server, and proxy. |
 | `simulator.py` | Scheduling, publisher caching, bursts, logging, and shutdown. |
 | `cli.py` | Argument parsing and process entry point. |
 | `__main__.py` | Enables `python -m simulation`. |
+
+TLS is enabled with `--tls` or port `8883`. `--dry-run` never connects.
+Supported scenarios are `none` and `dos`. The simulator produces traffic
+patterns; the classifier determines the final label.
 
 `simulador_iot.py` remains a backward-compatible wrapper. Docker runs
 `python -m simulation` directly.

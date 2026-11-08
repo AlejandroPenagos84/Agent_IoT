@@ -1,0 +1,223 @@
+{
+  "artifact": "ML_Model/artifacts/df_raw.joblib",
+  "artifact_version": 1,
+  "generated_at": "2026-10-22T16:50:45+00:00",
+  "generated_by": "ML_Model/01_eda_politica.ipynb",
+  "seed": 42,
+  "feature_version": "tcp-B-v1",
+  "feature_columns": {
+    "tcp_B": [
+      "frame.len",
+      "fe_log_len",
+      "frame.time_delta",
+      "fe_is_standard_mqtt_port",
+      "fe_is_broker_to_client",
+      "tcp_iat",
+      "tcp_iat_std_5s",
+      "tcp_frames_5s",
+      "tcp_bytes_5s",
+      "tcp_len_std_5s",
+      "tcp_asymmetry_5s",
+      "tcp_new_conns_5s"
+    ],
+    "mqtt_A": [
+      "frame.len",
+      "frame.time_delta",
+      "fe_bytes_per_sec",
+      "fe_is_standard_mqtt_port",
+      "fe_is_broker_to_client",
+      "fe_log_len",
+      "mqtt.hdrflags",
+      "mqtt.len",
+      "mqtt.topic_len",
+      "fe_msg_entropy",
+      "fe_topic_entropy",
+      "fe_topic_depth",
+      "fe_payload_ratio"
+    ]
+  },
+  "captures": {
+    "DoS": {
+      "file": "dataset/DoS.csv",
+      "sha256": "e935c819f8bc08898135180029bde0a685e9c5676d5277cacf66d917bb98d4e1",
+      "labels_kept": [
+        "normal",
+        "DoS"
+      ]
+    },
+    "MitM": {
+      "file": "dataset/MitM.csv",
+      "sha256": "bfee47413bcf82f3b1433d51db63629a1b61d1a40fc704f545f23c7350daa5d0",
+      "labels_kept": [
+        "normal"
+      ]
+    },
+    "Intrusion": {
+      "file": "dataset/Intrusion.csv",
+      "sha256": "730f65a2bd388b973f7088a28b8a37a3a0a56062ad059d90e95da9fffed93518",
+      "labels_kept": [
+        "normal"
+      ]
+    }
+  },
+  "labels": [
+    "normal",
+    "DoS"
+  ],
+  "target_column": "type",
+  "shape": {
+    "rows": 257457,
+    "columns": 21
+  },
+  "counts_by_class": {
+    "normal": 211997,
+    "DoS": 45460
+  },
+  "counts_by_capture_and_class": {
+    "DoS": {
+      "normal": 43000,
+      "DoS": 45460
+    },
+    "Intrusion": {
+      "normal": 69863,
+      "DoS": 0
+    },
+    "MitM": {
+      "normal": 99134,
+      "DoS": 0
+    }
+  },
+  "connections_by_class": {
+    "normal": 3628,
+    "DoS": 907
+  },
+  "connections_by_capture_and_class": {
+    "DoS": {
+      "normal": 697,
+      "DoS": 907
+    },
+    "Intrusion": {
+      "normal": 2067,
+      "DoS": 0
+    },
+    "MitM": {
+      "normal": 864,
+      "DoS": 0
+    }
+  },
+  "columns": [
+    "frame.time_delta",
+    "frame.time_epoch",
+    "tcp.srcport",
+    "tcp.dstport",
+    "frame.len",
+    "mqtt.clientid_len",
+    "mqtt.hdrflags",
+    "mqtt.kalive",
+    "mqtt.len",
+    "mqtt.msg",
+    "mqtt.proto_len",
+    "mqtt.protoname",
+    "mqtt.topic",
+    "mqtt.topic_len",
+    "mqtt.ver",
+    "type",
+    "_original_row",
+    "_capture",
+    "_endpoints",
+    "_connection",
+    "_direction"
+  ],
+  "column_roles": {
+    "frame.time_delta": "keep",
+    "frame.time_epoch": "context",
+    "tcp.srcport": "context",
+    "tcp.dstport": "context",
+    "frame.len": "keep",
+    "mqtt.clientid_len": "derive",
+    "mqtt.hdrflags": "keep",
+    "mqtt.kalive": "derive",
+    "mqtt.len": "keep",
+    "mqtt.msg": "derive",
+    "mqtt.proto_len": "derive",
+    "mqtt.protoname": "derive",
+    "mqtt.topic": "derive",
+    "mqtt.topic_len": "keep",
+    "mqtt.ver": "derive",
+    "type": "target",
+    "_original_row": "internal_key",
+    "_capture": "internal_key",
+    "_endpoints": "internal_key",
+    "_connection": "internal_key",
+    "_direction": "internal_key"
+  },
+  "dropped_columns": [
+    "eth.dst",
+    "eth.src",
+    "frame.cap_len",
+    "frame.coloring_rule.name",
+    "frame.coloring_rule.string",
+    "frame.comment",
+    "frame.comment.expert",
+    "frame.encap_type",
+    "frame.file_off",
+    "frame.ignored",
+    "frame.incomplete",
+    "frame.interface_id",
+    "frame.interface_name",
+    "frame.link_nr",
+    "frame.marked",
+    "frame.md5_hash",
+    "frame.number",
+    "frame.offset_shift",
+    "frame.time_delta_displayed",
+    "frame.time_invalid",
+    "frame.time_relative",
+    "ip.dst",
+    "ip.src",
+    "mqtt.clientid",
+    "mqtt.conack.flags",
+    "mqtt.conack.flags.reserved",
+    "mqtt.conack.flags.sp",
+    "mqtt.conack.val",
+    "mqtt.conflag.cleansess",
+    "mqtt.conflag.passwd",
+    "mqtt.conflag.qos",
+    "mqtt.conflag.reserved",
+    "mqtt.conflag.retain",
+    "mqtt.conflag.uname",
+    "mqtt.conflag.willflag",
+    "mqtt.conflags",
+    "mqtt.dupflag",
+    "mqtt.msgid",
+    "mqtt.msgtype",
+    "mqtt.passwd",
+    "mqtt.passwd_len",
+    "mqtt.qos",
+    "mqtt.retain",
+    "mqtt.sub.qos",
+    "mqtt.suback.qos",
+    "mqtt.username",
+    "mqtt.username_len",
+    "mqtt.willmsg",
+    "mqtt.willmsg_len",
+    "mqtt.willtopic",
+    "mqtt.willtopic_len"
+  ],
+  "policy_summary": {
+    "DERIVE/LEAKAGE": 2,
+    "DERIVE/RAW_TEXT": 2,
+    "DERIVE/STRUCTURAL_NULL": 5,
+    "DROP/CONSTANT": 14,
+    "DROP/DUPLICATE": 2,
+    "DROP/EMPTY": 19,
+    "DROP/LEAKAGE": 8,
+    "DROP/REDUNDANT": 4,
+    "DROP/STRUCTURAL_NULL": 5,
+    "KEEP/BEHAVIOR": 2,
+    "KEEP/STRUCTURAL_NULL": 3
+  },
+  "normal_concurrent_share_dos": 0.5862,
+  "split_strategy": "StratifiedGroupKFold por _connection",
+  "df_raw_sha256": "1554de54a5a32d6cc9047227712043c03ddd7bb8fee3b3b576ab48cd403921df"
+}

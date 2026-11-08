@@ -9,7 +9,7 @@ application code.
 | Directive | Value | Purpose |
 |---|---|---|
 | `persistence false` | — | Sessions are not retained between restarts. |
-| `allow_anonymous true` | — | Required by the simulator's intrusion scenario. |
+| `allow_anonymous true` | — | Simplifies the local lab; do not use it in production. |
 | `log_dest file` | `/mosquitto/log/mosquitto.log` | Writes a persistent debug log. |
 | `log_dest stdout` | — | Also sends logs to the container output. |
 | `log_type all` | — | Logs connections and publications. |

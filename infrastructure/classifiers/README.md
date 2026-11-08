@@ -13,7 +13,27 @@ the alert.
 Heavy imports (`torch`, `xgboost`, `joblib`, and `pandas`) are lazy, so merely
 importing this package does not require loading the models.
 
-## Feature contract
+## `TcpXgbClassifier` (modelo final B, solo TCP) — `model='tcp'`
+
+Carga `modelos_agente_tcp/` (`03_modelo_tcp.ipynb`): `xgb_tcp.ubj`,
+`le_target.joblib` y `pipeline_config.json` (`feature_mode='tcp'`). Valida que el
+booster exponga exactamente `feature_columns_tcp`. No calcula features: el sidecar ya
+escribe las 12 features TCP causales de cada frame en `tcp_features`, y
+`TsharkFeatureSource(feature_key='tcp_features')` las entrega tal cual, omitiendo los
+frames con `null` (sin puerto 1883/8883). Puntúa cada fila de forma independiente con
+`inplace_predict` en un hilo (~0,4 ms/frame); umbral 0,5.
+
+`build_agent` con `model='tcp'` usa ventana 1, `server_ports=(1883, 8883)` (la alerta
+reporta la IP del cliente aunque el frame sea respuesta del broker) y un cooldown de
+5 s por conexión: como mucho una alerta durante el handshake, sin `client_id`, y otra
+cuando se conoce el CONNECT. En Compose es el modelo por defecto (`MODELO=tcp`).
+
+Limitación: `tcp_new_conns_5s` cuenta conexiones nuevas en toda la red. Durante un
+flood, algunos frames de dispositivos normales también se marcan como ataque. En la
+prueba con el simulador, `relay` y `sonar` generaron 3 alertas cada uno durante el
+ataque y ninguna con solo tráfico normal.
+
+## Contrato de features (MQTT en claro)
 
 `_common.build_mqtt_features` mirrors the notebook's feature builder. It
 contains 13 compact features and excludes raw ports, identity columns, capture

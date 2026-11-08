@@ -129,12 +129,13 @@ services:
         from composition_root import AgentConfig, build_agent
         build_agent(AgentConfig(
             capture_path='/capture/features.jsonl',
-            model_dir='/app/modelos_agente',
+            model_dir=('/app/modelos_agente_tcp' if '${MODELO:-tcp}' == 'tcp'
+                       else '/app/modelos_agente'),
             broker_host='mosquitto',
             username='agente',
             alert_topic='alertas/deteccion',
             alert_dir='/alerts',
-            model='${MODELO:-lstm}',
+            model='${MODELO:-tcp}',
         )).run()
     depends_on:
       mosquitto:
@@ -144,6 +145,7 @@ services:
       - alert-data:/alerts
       - processed-data:/processed:ro
       - ./modelos_agente:/app/modelos_agente:ro,z
+      - ./modelos_agente_tcp:/app/modelos_agente_tcp:ro,z
     restart: unless-stopped
 
   etl:
@@ -193,8 +195,10 @@ services:
       - "1883"
       - --ataque
       - ${ATAQUE:-dos}
+      - --dos-mode
+      - ${DOS_MODE:-flood}
       - --paquetes
-      - "500"
+      - "${PAQUETES:-30000}"
     depends_on:
       mosquitto:
         condition: service_healthy
