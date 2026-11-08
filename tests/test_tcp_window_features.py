@@ -4,7 +4,7 @@ import math
 import sys
 import unittest
 
-from infrastructure.tshark.tcp_window_features import (
+from detection.infrastructure.tshark.tcp_window_features import (
     TCP_FEATURE_COLUMNS, TcpWindowFeatures,
 )
 

@@ -13,21 +13,33 @@ captured traffic. The multi-attack version of the project lives in
 
 ## Architecture
 
-The code follows Ports and Adapters with dependency inversion:
+The project is a modular monolith. All application code lives under `src/`
+and is split into two modules that do not import each other:
 
-| Component | Responsibility |
-|---|---|
-| `domain/` | Alert, frame context, client metadata, and connection models. |
-| `application/ports/` | `FeatureSource`, `Classifier`, and `AlertSink` contracts plus shared types. |
-| `application/use_cases/agent.py` | Groups frames per flow, classifies traffic, and emits non-normal alerts. |
-| `infrastructure/tshark/` | Captures MQTT traffic and converts frames into JSONL features, including the online TCP features. |
-| `infrastructure/classifiers/` | Loads the exported TCP, LSTM, XGBoost, and hybrid models. |
-| `infrastructure/sinks/` | Publishes alerts to MQTT and writes daily JSONL files. |
-| `infrastructure/alert_processing/` | Normalizes alerts, creates summaries, and generates reports. |
-| `infrastructure/api/` | FastAPI application that serves natural-language reports. |
-| `simulation/` | Produces normal traffic and DoS bursts. |
-| `ML_Model/` | Notebooks and helpers that train and export the models. |
-| `composition_root.py` | Wires concrete adapters into the application agent. |
+```text
+src/
+  detection/                 # always-on: capture, agent, alerts, reports
+    domain/                  # Alert, FrameContext, client metadata
+    application/             # Agent use case and its ports
+    infrastructure/
+      tshark/                # capture sidecar and JSONL feature source
+      classifiers/           # TCP, LSTM, XGBoost and hybrid models
+      sinks/                 # MQTT and daily JSONL alert sinks
+      mqtt_client.py         # paho client factory
+    reporting/               # ETL: normalize, summaries, report.json, Ollama
+    http/                    # FastAPI report API (/api/v1/reports)
+    composition_root.py      # wires the agent
+  auth/                      # registration, email verification, JWT sessions
+    domain/  application/  infrastructure/  http/
+simulation/                  # lab traffic generator (not production code)
+ML_Model/                    # notebooks that train and export the models
+tests/
+```
+
+Inside each module the code follows Ports and Adapters: use cases depend on
+port contracts, and `infrastructure/` provides the concrete adapters. Every
+container sets `PYTHONPATH=/app/src`, so modules are imported as
+`detection.…` and `auth.…`.
 
 ```text
 simulation -> Mosquitto -> tshark capture -> features.jsonl
@@ -167,14 +179,15 @@ The detector does not require Ollama. It can capture, classify, and persist
 alerts while Ollama is stopped. Ollama is used only for natural-language
 report generation.
 
-For a local run, start a broker, capture, and agent in separate terminals:
+For a local run, export `PYTHONPATH=src` and start a broker, capture, and agent in
+separate terminals:
 
 ```bash
-python -m infrastructure.tshark.stream_features \
+python -m detection.infrastructure.tshark.stream_features \
   --iface eth0 --filter "" \
   --exclude-topic alertas/deteccion --out /tmp/features.jsonl
 
-python -c "from composition_root import AgentConfig, build_agent; \
+python -c "from detection.composition_root import AgentConfig, build_agent; \
 build_agent(AgentConfig(capture_path='/tmp/features.jsonl', \
 model_dir='modelos_agente_tcp', model='tcp', broker_host='localhost', \
 alert_dir='/tmp/alerts')).run()"
@@ -365,9 +378,9 @@ docker compose --profile etl run --rm natural-report \
 For a local installation, the equivalent commands are:
 
 ```bash
-python -m infrastructure.alert_processing.report \
+python -m detection.reporting.report \
   --input /processed/summaries --output /processed/report.json
-python -m infrastructure.alert_processing.natural_report \
+python -m detection.reporting.natural_report \
   --input /processed/report.json --output /processed/report.md \
   --ollama-url http://localhost:11435 --ollama-model gemma3:4b
 ```
@@ -378,7 +391,7 @@ To request a historical reference in the Compose report stage:
 
 ```bash
 docker compose --profile etl run --rm --entrypoint python report \
-  -m infrastructure.alert_processing.report \
+  -m detection.reporting.report \
   --input /processed/summaries --output /processed/report.json \
   --now 2026-11-03T20:44:16Z
 ```
@@ -446,15 +459,15 @@ display filter without decryption.
 
 ## Tests
 
-Run the complete unit-test suite:
+Run the complete unit-test suite from the repository root:
 
 ```bash
-python -m unittest discover -s tests -v
+PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
 Additional component documentation is available in
-[`application/use_cases/README.md`](application/use_cases/README.md),
-[`infrastructure/classifiers/README.md`](infrastructure/classifiers/README.md),
-[`infrastructure/sinks/README.md`](infrastructure/sinks/README.md),
-[`infrastructure/tshark/README.md`](infrastructure/tshark/README.md), and
+[`src/detection/application/use_cases/README.md`](src/detection/application/use_cases/README.md),
+[`src/detection/infrastructure/classifiers/README.md`](src/detection/infrastructure/classifiers/README.md),
+[`src/detection/infrastructure/sinks/README.md`](src/detection/infrastructure/sinks/README.md),
+[`src/detection/infrastructure/tshark/README.md`](src/detection/infrastructure/tshark/README.md), and
 [`mosquitto/README.md`](mosquitto/README.md).

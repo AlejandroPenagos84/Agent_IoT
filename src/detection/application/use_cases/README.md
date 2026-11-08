@@ -19,5 +19,5 @@ sequence. An alert for broker-to-client traffic keeps the broker's source IP;
 Run regression tests with:
 
 ```bash
-python -m unittest discover -s tests -v
+PYTHONPATH=src python -m unittest discover -s tests -v
 ```

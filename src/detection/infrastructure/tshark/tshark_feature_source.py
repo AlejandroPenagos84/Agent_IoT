@@ -5,9 +5,9 @@ import os
 import time
 from typing import Iterator
 
-from application.ports.ports_out import FeatureSource
-from application.ports.types import FeatureRow, Frame
-from domain.model import FrameContext
+from detection.application.ports.ports_out import FeatureSource
+from detection.application.ports.types import FeatureRow, Frame
+from detection.domain.model import FrameContext
 
 from .tshark_schema import FEATURE_COLUMNS, NETWORK_COLUMNS
 

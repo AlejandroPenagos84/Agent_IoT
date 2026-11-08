@@ -53,7 +53,7 @@ The exported objective is binary: `normal` and `ataque`.
 ## Adapters
 
 - `HybridClassifier`: compact MQTT features plus LSTM reconstruction error;
-  this is the default when `composition_root` is used directly.
+  this is the default when `detection.composition_root` is used directly.
 - `TlsClassifier`: XGBoost over network features.
 - `AnomalyClassifier`: LSTM autoencoder; compares reconstruction error with
   the configured anomaly threshold.

@@ -3,8 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from domain.model import Alert
-from infrastructure.sinks import CompositeAlertSink, DailyFileAlertSink
+from detection.domain.model import Alert
+from detection.infrastructure.sinks import CompositeAlertSink, DailyFileAlertSink
 
 
 class RecordingSink:

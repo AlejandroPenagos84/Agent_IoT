@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from infrastructure.alert_processing.report import build_last_24h_report
+from detection.reporting.report import build_last_24h_report
 
 
 class AlertReportTests(unittest.TestCase):

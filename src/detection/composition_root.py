@@ -3,15 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Sequence
 
-from application import Agent
-from infrastructure.classifiers import (AnomalyClassifier, HybridClassifier, TcpXgbClassifier,
+from detection.application import Agent
+from detection.infrastructure.classifiers import (AnomalyClassifier, HybridClassifier, TcpXgbClassifier,
                                        XgbClassifier)
-from infrastructure.sinks import (
+from detection.infrastructure.sinks import (
     CompositeAlertSink,
     DailyFileAlertSink,
     MqttAlertSink,
 )
-from infrastructure.tshark.tshark_feature_source import TsharkFeatureSource
+from detection.infrastructure.tshark.tshark_feature_source import TsharkFeatureSource
 
 BINARY_LABELS = {'normal', 'ataque'}
 

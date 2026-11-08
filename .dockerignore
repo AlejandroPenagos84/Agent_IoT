@@ -8,3 +8,4 @@ __pycache__
 ml-mqtt-model.ipynb
 mosquitto/certs
 mosquitto/log
+.env

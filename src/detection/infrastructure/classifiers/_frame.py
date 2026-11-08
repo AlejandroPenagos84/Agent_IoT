@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from application.ports.types import FeatureRow
-from infrastructure.tshark.tshark_schema import FEATURE_COLUMNS
+from detection.application.ports.types import FeatureRow
+from detection.infrastructure.tshark.tshark_schema import FEATURE_COLUMNS
 
 
 def to_frame(window: Sequence[FeatureRow]):

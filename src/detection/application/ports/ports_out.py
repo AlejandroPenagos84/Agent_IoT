@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Iterator, Sequence
 
-from domain.model import Alert
+from detection.domain.model import Alert
 from .types import FeatureRow, Frame
 
 """Driven ports invoked by application use cases."""

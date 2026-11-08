@@ -95,5 +95,5 @@ patterns; the classifier determines the final label.
 Run tests with:
 
 ```bash
-python -m unittest discover -s tests -v
+PYTHONPATH=src python -m unittest discover -s tests -v
 ```

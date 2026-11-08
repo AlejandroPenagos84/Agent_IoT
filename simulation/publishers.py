@@ -36,7 +36,7 @@ class MqttPublisher(Publisher):
     def __init__(self, client_id, host, port, username=None, password=None,
                  tls=None):
         """Connect and start the paho network loop."""
-        from mqtt_utils import make_client
+        from detection.infrastructure.mqtt_client import make_client
 
         self.client_id = client_id
         self._client = make_client(client_id, username=username,

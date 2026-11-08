@@ -7,11 +7,11 @@ from unittest.mock import patch
 try:
     from fastapi.testclient import TestClient
 
-    from infrastructure.api import ApiSettings, create_app
+    from detection.http import ApiSettings, create_app
 except ImportError as exc:  # fastapi or httpx not installed
     raise unittest.SkipTest(f"API test dependencies missing: {exc}")
 
-SERVICE = "infrastructure.api.report_service.generate_report"
+SERVICE = "detection.http.report_service.generate_report"
 
 
 class ReportApiTests(unittest.TestCase):

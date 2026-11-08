@@ -4,12 +4,12 @@ import json
 import tempfile
 import unittest
 
-from application.ports.ports_out import AlertSink, Classifier, FeatureSource
-from application.ports.types import Frame
-from application.use_cases.agent import Agent
-from domain.model import FrameContext
-from infrastructure.tshark.tcp_window_features import TCP_FEATURE_COLUMNS
-from infrastructure.tshark.tshark_feature_source import TsharkFeatureSource
+from detection.application.ports.ports_out import AlertSink, Classifier, FeatureSource
+from detection.application.ports.types import Frame
+from detection.application.use_cases.agent import Agent
+from detection.domain.model import FrameContext
+from detection.infrastructure.tshark.tcp_window_features import TCP_FEATURE_COLUMNS
+from detection.infrastructure.tshark.tshark_feature_source import TsharkFeatureSource
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_DIR = ROOT / 'modelos_agente_tcp'
@@ -107,7 +107,7 @@ class TcpAgentTests(unittest.TestCase):
     @unittest.skipUnless(HAS_XGB and (MODEL_DIR / 'xgb_tcp.ubj').is_file(),
                          'requiere xgboost y modelos_agente_tcp/')
     def test_classifier_loads_export_and_labels_rows(self):
-        from infrastructure.classifiers import TcpXgbClassifier
+        from detection.infrastructure.classifiers import TcpXgbClassifier
 
         classifier = TcpXgbClassifier(str(MODEL_DIR))
         quiet = dict.fromkeys(TCP_FEATURE_COLUMNS, 0.0)

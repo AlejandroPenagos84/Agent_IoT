@@ -1,12 +1,12 @@
 import unittest
 
-from application.ports.ports_out import AlertSink, Classifier, FeatureSource
-from application.ports.types import Frame
-from application.use_cases.agent import Agent
-from domain.model import FrameContext
-from infrastructure.classifiers._common import crear_secuencias
-from infrastructure.tshark.stream_features import FIELDS, record_from_fields
-from infrastructure.tshark.tshark_feature_source import TsharkFeatureSource
+from detection.application.ports.ports_out import AlertSink, Classifier, FeatureSource
+from detection.application.ports.types import Frame
+from detection.application.use_cases.agent import Agent
+from detection.domain.model import FrameContext
+from detection.infrastructure.classifiers._common import crear_secuencias
+from detection.infrastructure.tshark.stream_features import FIELDS, record_from_fields
+from detection.infrastructure.tshark.tshark_feature_source import TsharkFeatureSource
 
 
 class Source(FeatureSource):

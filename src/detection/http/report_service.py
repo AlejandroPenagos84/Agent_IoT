@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from infrastructure.alert_processing.ollama import generate_report
+from detection.reporting.ollama import generate_report
 
 
 class NaturalReportService:

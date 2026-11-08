@@ -4,8 +4,8 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from application.ports.ports_out import AlertSink
-from domain.model import Alert
+from detection.application.ports.ports_out import AlertSink
+from detection.domain.model import Alert
 
 
 class DailyFileAlertSink(AlertSink):

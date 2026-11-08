@@ -3,9 +3,9 @@ from __future__ import annotations
 from collections import deque
 from typing import Sequence
 
-from application.ports.ports_out import Classifier, FeatureSource
-from application.ports.ports_out import AlertSink
-from domain.model import ALERT_KIND_CLASS, Alert, FrameContext
+from detection.application.ports.ports_out import Classifier, FeatureSource
+from detection.application.ports.ports_out import AlertSink
+from detection.domain.model import ALERT_KIND_CLASS, Alert, FrameContext
 
 DEFAULT_WINDOW = 11
 DEFAULT_NORMAL_LABELS = ('normal',)

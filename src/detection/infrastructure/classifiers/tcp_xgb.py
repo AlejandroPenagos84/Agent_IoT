@@ -3,8 +3,8 @@ from __future__ import annotations
 import os
 from typing import Sequence
 
-from application.ports.ports_out import Classifier
-from application.ports.types import FeatureRow
+from detection.application.ports.ports_out import Classifier
+from detection.application.ports.types import FeatureRow
 
 from ._common import load_config, validate_named_features
 

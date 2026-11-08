@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 import unittest
 
-from infrastructure.tshark.stream_features import (
+from detection.infrastructure.tshark.stream_features import (
     FIELDS, build_command, build_display_filter, parse_args, record_from_fields,
 )
 

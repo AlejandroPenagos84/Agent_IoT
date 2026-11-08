@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from application.ports.ports_out import AlertSink
-from domain.model import Alert
+from detection.application.ports.ports_out import AlertSink
+from detection.domain.model import Alert
 
 
 class CompositeAlertSink(AlertSink):

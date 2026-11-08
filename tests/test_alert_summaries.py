@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from infrastructure.alert_processing.summaries import build_summaries
+from detection.reporting.summaries import build_summaries
 
 
 class AlertSummaryTests(unittest.TestCase):

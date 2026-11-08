@@ -24,7 +24,7 @@ en las ventanas. Solo usa la biblioteca estándar.
 schema, además de los `__init__.py`. No necesita `application`, `domain` ni
 dependencias ML. El paquete carga `TsharkFeatureSource` de forma lazy solo
 cuando se importa explícitamente, para que arrancar el recolector con `python
--m infrastructure.tshark.stream_features` no cargue el agente.
+-m detection.infrastructure.tshark.stream_features` no cargue el agente.
 
 ## Container behavior
 
@@ -42,7 +42,7 @@ docker compose up -d --build --force-recreate capture
 By default all frames are captured. Use `--filter` to restrict the capture:
 
 ```bash
-python -m infrastructure.tshark.stream_features \
+python -m detection.infrastructure.tshark.stream_features \
   --iface eth0 --filter mqtt --exclude-topic alertas/deteccion \
   --out /tmp/features.jsonl
 ```

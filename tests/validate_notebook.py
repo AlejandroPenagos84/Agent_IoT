@@ -42,7 +42,7 @@ def main():
                 namespace['EPOCHS'] = 1
                 namespace['plt'] = None
         import numpy as np
-        from infrastructure.classifiers._common import build_mqtt_features
+        from detection.infrastructure.classifiers._common import build_mqtt_features
         raw, features = namespace['df_raw'], namespace['X']
         np.testing.assert_allclose(features.to_numpy(), build_mqtt_features(raw).to_numpy())
         partitions = namespace['partitions']
@@ -55,8 +55,8 @@ def main():
         assert 'tcp.srcport' not in features
         assert 'mqtt.hdrflags' in features
         if not args.prepare:
-            from composition_root import AgentConfig, build_agent
-            from infrastructure.classifiers._frame import to_frame
+            from detection.composition_root import AgentConfig, build_agent
+            from detection.infrastructure.classifiers._frame import to_frame
             # Los tres adapters deben cargar los artefactos exportados y coincidir
             # con las predicciones del notebook sobre la misma ventana.
             indices = windows['test'][0]

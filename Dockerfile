@@ -6,6 +6,7 @@ FROM ${BASE_IMAGE}
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app/src
 WORKDIR /app
 
 # Install minimal system dependencies for building wheels

@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 import os
 
-from application.ports.ports_out import AlertSink
-from domain.model import Alert
+from detection.application.ports.ports_out import AlertSink
+from detection.domain.model import Alert
 
 class FileAlertSink(AlertSink):
     """Append each alert as one JSON object per line."""

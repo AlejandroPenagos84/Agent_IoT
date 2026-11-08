@@ -3,14 +3,14 @@ import unittest
 from unittest.mock import patch
 from urllib.request import Request
 
-from infrastructure.alert_processing.ollama import (
+from detection.reporting.ollama import (
     REPORT_PROMPT,
     generate_report,
 )
 
 
 class OllamaReportTests(unittest.TestCase):
-    @patch("infrastructure.alert_processing.ollama.urlopen")
+    @patch("detection.reporting.ollama.urlopen")
     def test_sends_json_and_prompt_to_chat_endpoint(self, urlopen):
         response = urlopen.return_value.__enter__.return_value
         response.__enter__.return_value = response
@@ -42,7 +42,7 @@ class OllamaReportTests(unittest.TestCase):
         self.assertIn("exclusivamente en español", body["messages"][1]["content"])
         self.assertIn('"total_alerts": 2', body["messages"][1]["content"])
 
-    @patch("infrastructure.alert_processing.ollama.urlopen")
+    @patch("detection.reporting.ollama.urlopen")
     def test_rejects_empty_model_response(self, urlopen):
         response = urlopen.return_value.__enter__.return_value
         response.__iter__.return_value = iter((b'{"done":true}\n',))
@@ -50,7 +50,7 @@ class OllamaReportTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "non-empty"):
                 generate_report({}, base_url="http://ollama:11434", model="model")
 
-    @patch("infrastructure.alert_processing.ollama.urlopen")
+    @patch("detection.reporting.ollama.urlopen")
     def test_rejects_json_instead_of_natural_report(self, urlopen):
         response = urlopen.return_value.__enter__.return_value
         response.__iter__.return_value = iter((

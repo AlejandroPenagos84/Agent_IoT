@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from infrastructure.alert_processing import AlertProcessingPipeline
+from detection.reporting import AlertProcessingPipeline
 
 
 class AlertProcessingTests(unittest.TestCase):

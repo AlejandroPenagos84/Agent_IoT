@@ -102,7 +102,7 @@ class SimulationTests(unittest.TestCase):
     def test_publisher_rejected_connection_cleans_up(self):
         client = Mock()
         client.loop_start.side_effect = lambda: client.on_connect(client, None, {}, 5)
-        with patch('mqtt_utils.make_client', return_value=client):
+        with patch('detection.infrastructure.mqtt_client.make_client', return_value=client):
             with self.assertRaisesRegex(RuntimeError, 'conexión rechazada'):
                 MqttPublisher('test', 'broker', 1883)
         client.disconnect.assert_called_once()
@@ -122,7 +122,7 @@ class SimulationTests(unittest.TestCase):
 
         info.wait_for_publish.side_effect = complete
         client.disconnect.side_effect = lambda: order.append('disconnect')
-        with patch('mqtt_utils.make_client', return_value=client):
+        with patch('detection.infrastructure.mqtt_client.make_client', return_value=client):
             publisher = MqttPublisher('test', 'broker', 1883)
             self.assertEqual(publisher.publish('home/test', 'payload'), 0)
             publisher.stop()
@@ -134,7 +134,7 @@ class SimulationTests(unittest.TestCase):
         info = Mock(rc=0)
         info.is_published.return_value = False
         client.publish.return_value = info
-        with patch('mqtt_utils.make_client', return_value=client):
+        with patch('detection.infrastructure.mqtt_client.make_client', return_value=client):
             publisher = MqttPublisher('test', 'broker', 1883)
             publisher.publish('home/test', 'payload')
             with self.assertRaisesRegex(RuntimeError, 'pendientes'):

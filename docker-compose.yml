@@ -126,7 +126,7 @@ services:
     command:
       - -c
       - |
-        from composition_root import AgentConfig, build_agent
+        from detection.composition_root import AgentConfig, build_agent
         build_agent(AgentConfig(
             capture_path='/capture/features.jsonl',
             model_dir=('/app/modelos_agente_tcp' if '${MODELO:-tcp}' == 'tcp'
@@ -158,13 +158,13 @@ services:
         interval="$${ETL_INTERVAL_SECONDS:-300}"
         while :; do
           if find /alerts -maxdepth 1 -type f -name '*.jsonl' -size +0c | grep -q .; then
-            python -m infrastructure.alert_processing \
+            python -m detection.reporting \
               --input /alerts \
               --output /alerts/normalized
-            python -m infrastructure.alert_processing.summaries \
+            python -m detection.reporting.summaries \
               --input /alerts/normalized/alerts.parquet \
               --output /processed/summaries
-            python -m infrastructure.alert_processing.report \
+            python -m detection.reporting.report \
               --input /processed/summaries \
               --output /processed/report.json
           else
@@ -209,7 +209,7 @@ services:
     container_name: summaries
     command:
       - -m
-      - infrastructure.alert_processing.summaries
+      - detection.reporting.summaries
       - --input
       - /alerts/normalized/alerts.parquet
       - --output
@@ -225,7 +225,7 @@ services:
     container_name: normalize
     command:
       - -m
-      - infrastructure.alert_processing
+      - detection.reporting
       - --input
       - /alerts
       - --output
@@ -240,7 +240,7 @@ services:
     container_name: report
     command:
       - -m
-      - infrastructure.alert_processing.report
+      - detection.reporting.report
       - --input
       - /processed/summaries
       - --output
@@ -255,7 +255,7 @@ services:
     container_name: natural-report
     command:
       - -m
-      - infrastructure.alert_processing.natural_report
+      - detection.reporting.natural_report
       - --input
       - /processed/report.json
       - --ollama-timeout
@@ -277,7 +277,7 @@ services:
     command:
       - -m
       - uvicorn
-      - infrastructure.api.app:create_app
+      - detection.http.app:create_app
       - --factory
       - --host
       - 0.0.0.0
