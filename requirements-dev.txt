@@ -1,0 +1,3 @@
+# Herramientas de desarrollo (no van en las imágenes).
+ruff==0.17.5
+pre-commit

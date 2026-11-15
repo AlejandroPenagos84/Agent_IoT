@@ -1,407 +1,128 @@
-x-app: &app
-  build: .
-  image: proyecto:latest
-  entrypoint: ["python"]
+# Central de AgentIoT (lo que va en AWS): un solo proceso `app` con la API
+# (auth + detección) y el agente que recibe las capturas por TLS 8443.
+#
+#   certgen  certificados autofirmados del agente (dev / sin dominio)
+#   redis    códigos de verificación de correo
+#   app      API + agente + retención; SQLite en el volumen app-data
+#   caddy    HTTPS público hacia app:8000
+#
+# Ollama (reportes en lenguaje natural) es opcional: --profile ollama.
+# La captura del cliente y el laboratorio están en docker-compose.capture.yml.
+name: agent_iot
 
 services:
   certgen:
     image: alpine:3.20
-    container_name: certgen
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -e
-        apk add --no-cache openssl >/dev/null
-        mkdir -p /mosquitto/log /agent-certs
-        chmod 777 /mosquitto/log
-        if [ ! -f /certs/server.crt ]; then
-          openssl req -x509 -newkey rsa:2048 -nodes \
-            -keyout /certs/server.key -out /certs/server.crt -days 3650 \
-            -subj "/CN=mosquitto" \
-            -addext "subjectAltName=DNS:mosquitto,DNS:localhost,IP:127.0.0.1"
-          cp /certs/server.crt /certs/ca.crt
-        fi
-        if [ ! -f /agent-certs/server.crt ]; then
-          openssl req -x509 -newkey rsa:2048 -nodes \
-            -keyout /agent-certs/ca.key -out /agent-certs/ca.crt -days 3650 \
-            -subj "/CN=agent-iot-ca" \
-            -addext "basicConstraints=critical,CA:TRUE" \
-            -addext "keyUsage=critical,keyCertSign,cRLSign" \
-            -addext "subjectKeyIdentifier=hash"
-          openssl req -newkey rsa:2048 -nodes \
-            -keyout /agent-certs/server.key -out /agent-certs/server.csr \
-            -subj "/CN=agente"
-          cat > /agent-certs/server.ext <<'EOF'
-        [v3_req]
-        basicConstraints=CA:FALSE
-        keyUsage=digitalSignature,keyEncipherment
-        extendedKeyUsage=serverAuth
-        subjectAltName=DNS:agente,DNS:localhost,IP:127.0.0.1
-        EOF
-          openssl x509 -req -in /agent-certs/server.csr \
-            -CA /agent-certs/ca.crt -CAkey /agent-certs/ca.key \
-            -CAcreateserial -out /agent-certs/server.crt -days 3650 \
-            -extfile /agent-certs/server.ext -extensions v3_req
-          rm -f /agent-certs/server.csr /agent-certs/server.ext \
-            /agent-certs/ca.srl
-        fi
-        chmod 644 /certs/server.key /certs/server.crt /certs/ca.crt
-        chmod 644 /agent-certs/ca.crt /agent-certs/server.crt
-        chmod 600 /agent-certs/server.key /agent-certs/ca.key
-        echo "certificados listos"
+    command: ["/bin/sh", "/certgen.sh"]
+    environment:
+      AGENT_CERT_DIR: /agent-certs
     volumes:
-      - ./mosquitto/certs:/certs:z
-      - ./certs/agent:/agent-certs
-      - mosquitto-log:/mosquitto/log
+      - ./deploy/certgen.sh:/certgen.sh:ro,z
+      - ${AGENT_CERT_HOST_DIR:-./certs/agent}:/agent-certs:z
     restart: "no"
 
-  mosquitto:
-    image: eclipse-mosquitto:2
-    container_name: mosquitto
-    ports:
-      - "1883:1883"
-      - "8883:8883"
-    volumes:
-      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro,z
-      - ./mosquitto/certs:/mosquitto/certs:ro,z
-      - mosquitto-log:/mosquitto/log
-    command:
-      - /bin/sh
-      - -c
-      - |
-        i=0
-        until [ -s /mosquitto/certs/server.crt ] && [ -s /mosquitto/certs/server.key ]; do
-          i=$$((i + 1))
-          if [ "$$i" -gt 60 ]; then
-            echo "certificados no disponibles tras 60s" >&2
-            exit 1
-          fi
-          sleep 1
-        done
-        exec /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
     healthcheck:
-      test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -i healthcheck -u healthcheck -t '$$SYS/broker/uptime' -C 1 -W 3 >/dev/null 2>&1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - redis-data:/data
     restart: unless-stopped
 
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama
-    profiles:
-      - ollama
-      - etl
-    ports:
-      - "${OLLAMA_PORT:-11435}:11434"
-    volumes:
-      - ollama-data:/root/.ollama
-    healthcheck:
-      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 10s
-    restart: unless-stopped
-
-  ollama-init:
-    image: ollama/ollama:latest
-    container_name: ollama-init
-    profiles:
-      - ollama
-      - etl
+  app:
+    build: .
+    image: agentiot-app:latest
     environment:
-      OLLAMA_HOST: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma3:4b}
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -eu
-        until ollama list >/dev/null 2>&1; do
-          sleep 2
-        done
-        ollama pull "$$OLLAMA_MODEL"
-        echo "Modelo Ollama disponible: $$OLLAMA_MODEL"
-    depends_on:
-      ollama:
-        condition: service_healthy
-    restart: "no"
-
-  # Hace lo mismo que "Agregar broker" en la web: registra el Mosquitto local
-  # y deja su clave de inscripción. Idempotente: no duplica en cada `up`.
-  bootstrap:
-    <<: *app
-    container_name: bootstrap
-    command: ["-m", "detection.infrastructure.dev_bootstrap"]
-    environment:
-      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-}
-      DETECTION_DB_PATH: /data/detection.db
-      DEV_TENANT_ID: ${DEV_TENANT_ID:-}
-      DEV_BROKER_NAME: ${DEV_BROKER_NAME:-mosquitto-dev}
-    volumes:
-      - detection-data:/data
-      - bootstrap-data:/bootstrap
-    restart: "no"
-
-  capture:
-    build:
-      context: .
-      dockerfile: Dockerfile.capture
-    image: proyecto-capture:latest
-    container_name: capture
-    network_mode: "service:mosquitto"
-    cap_add:
-      - NET_RAW
-    # Se inscribe con la clave del bootstrap, igual que en un cliente. En
-    # desarrollo envía por el socket Unix local, que no exige token.
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        . /bootstrap/dev.env
-        exec python -m detection.infrastructure.tshark.stream_features \
-          --iface eth0 --filter "" \
-          --exclude-topic alertas/deteccion \
-          --endpoint unix:///capture/features.sock
-    environment:
-      SENSOR_NAME: capture-dev
-    volumes:
-      - capture-data:/capture
-      - capture-state:/state
-      - bootstrap-data:/bootstrap:ro
-    depends_on:
-      mosquitto:
-        condition: service_healthy
-      bootstrap:
-        condition: service_completed_successfully
-      report-api:
-        condition: service_healthy
-    restart: unless-stopped
-
-  agente:
-    <<: *app
-    container_name: agente
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        . /bootstrap/dev.env
-        exec python -c "
-        import os
-        from detection.composition_root import AgentConfig, build_agent
-        build_agent(AgentConfig(
-            capture_endpoint='unix:///capture/features.sock',
-            model_dir='/app/modelos_agente_tcp',
-            broker_host='mosquitto',
-            username='agente',
-            alert_topic='alertas/deteccion',
-            alert_dir='/alerts',
-            evidence_dir='/evidence',
-            alert_api_url=os.getenv('ALERT_API_URL') or None,
-            alert_api_ca=os.getenv('ALERT_API_CA') or None,
-        )).run()
-        "
-    environment:
-      # El agente genera y renueva su propio token de API con este secreto.
-      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-}
-      ALERT_API_CA: ${ALERT_API_CA:-}
-    depends_on:
-      mosquitto:
-        condition: service_healthy
-      bootstrap:
-        condition: service_completed_successfully
-      report-api:
-        condition: service_healthy
-    volumes:
-      - capture-data:/capture
-      - alert-data:/alerts
-      - evidence-data:/evidence
-      - processed-data:/processed:ro
-      - bootstrap-data:/bootstrap:ro
-      - ./modelos_agente_tcp:/app/modelos_agente_tcp:ro,z
-    restart: unless-stopped
-
-  etl:
-    <<: *app
-    container_name: etl
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -eu
-        interval="$${ETL_INTERVAL_SECONDS:-300}"
-        while :; do
-          python -m detection.reporting.retention
-          if find /alerts -maxdepth 1 -type f -name '*.jsonl' -size +0c | grep -q .; then
-            python -m detection.reporting \
-              --input /alerts \
-              --output /alerts/normalized
-            python -m detection.reporting.summaries \
-              --input /alerts/normalized/alerts.parquet \
-              --output /processed/summaries
-            python -m detection.reporting.report \
-              --input /processed/summaries \
-              --output /processed/report.json
-          else
-            echo "ETL: aún no hay alertas JSONL para procesar"
-          fi
-          sleep "$$interval"
-        done
-    environment:
-      ETL_INTERVAL_SECONDS: ${ETL_INTERVAL_SECONDS:-300}
-      REPORT_TIMEZONE: ${REPORT_TIMEZONE:-America/Bogota}
-      EVIDENCE_RETENTION_DAYS: ${EVIDENCE_RETENTION_DAYS:-30}
-      ALERT_RETENTION_DAYS: ${ALERT_RETENTION_DAYS:-0}
-    volumes:
-      - alert-data:/alerts
-      - evidence-data:/evidence
-      - processed-data:/processed
-    depends_on:
-      agente:
-        condition: service_started
-    restart: unless-stopped
-
-  simulador:
-    <<: *app
-    container_name: simulador
-    profiles:
-      - simulator
-    command:
-      - -m
-      - simulation
-      - --broker
-      - mosquitto
-      - --port
-      - "1883"
-      - --ataque
-      - ${ATAQUE:-dos}
-      - --dos-mode
-      - ${DOS_MODE:-flood}
-      - --paquetes
-      - "${PAQUETES:-30000}"
-    depends_on:
-      mosquitto:
-        condition: service_healthy
-    restart: "no"
-
-  summaries:
-    <<: *app
-    container_name: summaries
-    command:
-      - -m
-      - detection.reporting.summaries
-      - --input
-      - /alerts/normalized/alerts.parquet
-      - --output
-      - /processed/summaries
-    volumes:
-      - alert-data:/alerts:ro
-      - processed-data:/processed
-    profiles:
-      - etl
-
-  normalize:
-    <<: *app
-    container_name: normalize
-    command:
-      - -m
-      - detection.reporting
-      - --input
-      - /alerts
-      - --output
-      - /alerts/normalized
-    volumes:
-      - alert-data:/alerts
-    profiles:
-      - etl
-
-  report:
-    <<: *app
-    container_name: report
-    command:
-      - -m
-      - detection.reporting.report
-      - --input
-      - /processed/summaries
-      - --output
-      - /processed/report.json
-    volumes:
-      - processed-data:/processed
-    profiles:
-      - etl
-
-  natural-report:
-    <<: *app
-    container_name: natural-report
-    command:
-      - -m
-      - detection.reporting.natural_report
-      - --input
-      - /processed/report.json
-      - --ollama-timeout
-      - ${OLLAMA_TIMEOUT:-300}
-    volumes:
-      - processed-data:/processed
-    environment:
-      OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma3:4b}
-    depends_on:
-      ollama-init:
-        condition: service_completed_successfully
-    profiles:
-      - etl
-
-  report-api:
-    <<: *app
-    container_name: report-api
-    command:
-      - -m
-      - uvicorn
-      - detection.http.app:create_app
-      - --factory
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8000"
-    ports:
-      - "${REPORT_API_PORT:-8000}:8000"
-    volumes:
-      - processed-data:/processed:ro
-      - alert-data:/alerts
-      - detection-data:/data
-      - ./certs/agent/ca.crt:/certs/agent/ca.crt:ro
-    environment:
-      REPORT_PATH: /processed/report.json
-      OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma3:4b}
-      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-300}
-      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
+      # Rutas dentro del contenedor (fijas).
+      AUTH_DB_PATH: /data/auth.db
       DETECTION_DB_PATH: /data/detection.db
       ALERTS_DIR: /alerts
-      REPORT_TIMEZONE: ${REPORT_TIMEZONE:-America/Bogota}
-      SENSOR_TOKEN_TTL_MINUTES: ${SENSOR_TOKEN_TTL_MINUTES:-1440}
-      # Lo que la web muestra en el comando de instalación y lo que recibe la
-      # captura al inscribirse. En producción: URLs públicas.
-      PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:8000}
-      AGENT_PUBLIC_ENDPOINT: ${AGENT_PUBLIC_ENDPOINT:-tls://localhost:8443}
-      AGENT_TLS_SERVER_NAME: ${AGENT_TLS_SERVER_NAME:-agente}
-      AGENT_CA_PATH: /certs/agent/ca.crt
-      CAPTURE_IMAGE: ${CAPTURE_IMAGE:-proyecto-capture:latest}
+      EVIDENCE_DIR: /evidence
+      REPORT_PATH: /processed/report.json
+      MODEL_DIR: /app/modelos_agente_tcp
+      AUTH_REDIS_HOST: redis
+      CAPTURE_ENDPOINT: tls://0.0.0.0:8443
+      # Obligatorio.
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?define AUTH_JWT_SECRET en .env}
+      # Certificado del agente: el de certgen, o el de Caddy en producción.
+      TLS_CERT: ${TLS_CERT:-/certs/agent/server.crt}
+      TLS_KEY: ${TLS_KEY:-/certs/agent/server.key}
+      # Lo que recibe la captura al inscribirse. Los valores por defecto
+      # sirven para el laboratorio local (misma red Docker).
+      PUBLIC_API_URL: ${PUBLIC_API_URL:-http://app:8000}
+      AGENT_PUBLIC_ENDPOINT: ${AGENT_PUBLIC_ENDPOINT:-tls://app:8443}
+      AGENT_TLS_SERVER_NAME: ${AGENT_TLS_SERVER_NAME:-app}
+      AGENT_CA_PATH: ${AGENT_CA_PATH-/certs/agent/ca.crt}
+      CAPTURE_IMAGE: ${CAPTURE_IMAGE:-agentiot-capture:latest}
+    # Opcionales: se pasan solo si están en .env; si no, rige el valor por
+    # defecto del código.
+    env_file:
+      - path: ${APP_ENV_FILE:-.env}
+        required: false
+    ports:
+      - "${API_BIND:-127.0.0.1}:${API_PORT:-8000}:8000"
+      - "${AGENT_BIND:-0.0.0.0}:${AGENT_PORT:-8443}:8443"
+    volumes:
+      - app-data:/data
+      - alert-data:/alerts
+      - evidence-data:/evidence
+      - processed-data:/processed
+      - ${AGENT_CERT_HOST_DIR:-./certs/agent}:/certs/agent:ro,z
+      - caddy-data:/caddy:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
       interval: 5s
       timeout: 5s
       retries: 12
-      start_period: 5s
+      start_period: 10s
     depends_on:
       certgen:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      # Docker rootless no abre puertos < 1024: usa HTTP_PORT=8080 y
+      # HTTPS_PORT=8444 o una redirección en el firewall.
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    environment:
+      API_DOMAIN: ${API_DOMAIN:-localhost}
+      AGENT_DOMAIN: ${AGENT_DOMAIN:-agent.localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-admin@example.com}
+      CADDY_EXTRA_GLOBAL: ${CADDY_EXTRA_GLOBAL:-}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro,z
+      - caddy-data:/data
+      - caddy-config:/config
+    # Sin esperar a que app esté sana: en producción app espera el
+    # certificado que emite Caddy.
+    depends_on:
+      - app
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    ports:
+      - "127.0.0.1:${OLLAMA_PORT:-11435}:11434"
+    volumes:
+      - ollama-data:/root/.ollama
     restart: unless-stopped
 
 volumes:
-  bootstrap-data:
-  capture-state:
-  mosquitto-log:
-  capture-data:
+  app-data:
+  redis-data:
   alert-data:
-  detection-data:
   evidence-data:
   processed-data:
+  caddy-data:
+  caddy-config:
   ollama-data:

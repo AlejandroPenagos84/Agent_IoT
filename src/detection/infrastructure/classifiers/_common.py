@@ -15,7 +15,8 @@ def validate_named_features(expected, actual, where: str) -> None:
     if actual is None:
         raise ValueError(
             f'{where}: el artefacto no expone nombres de features; '
-            'no se puede verificar contra pipeline_config.json')
+            'no se puede verificar contra pipeline_config.json'
+        )
     expected = list(expected)
     actual = list(actual)
     if expected != actual:
@@ -24,5 +25,6 @@ def validate_named_features(expected, actual, where: str) -> None:
             f'el modelo exportado.\n'
             f'  config ({len(expected)}): {expected}\n'
             f'  modelo ({len(actual)}): {actual}\n'
-            'Reentrena y reexporta modelos_agente_tcp/ desde 03_modelo_tcp.ipynb.')
+            'Reentrena y reexporta modelos_agente_tcp/ desde 03_modelo_tcp.ipynb.'
+        )
     return None

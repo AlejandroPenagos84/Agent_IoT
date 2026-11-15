@@ -1,6 +1,11 @@
 from auth.application.dtos import TokenPair
-from auth.application.errors import (AccountDisabled, AccountNotVerified, MalformedToken,
-                                     RefreshTokenReused, RevokedToken)
+from auth.application.errors import (
+    AccountDisabled,
+    AccountNotVerified,
+    MalformedToken,
+    RefreshTokenReused,
+    RevokedToken,
+)
 from auth.application.ports.refresh_store import RefreshTokenStore
 from auth.application.ports.token_service import TokenService
 from auth.application.ports.user_repository import UserRepository
@@ -21,8 +26,9 @@ class RefreshSession:
       sesión; también se revoca la familia.
     """
 
-    def __init__(self, tokens: TokenService, user_repository: UserRepository,
-                 store: RefreshTokenStore):
+    def __init__(
+        self, tokens: TokenService, user_repository: UserRepository, store: RefreshTokenStore
+    ):
         self.tokens = tokens
         self.user_repository = user_repository
         self.store = store
@@ -32,33 +38,33 @@ class RefreshSession:
         stored = self.store.get(claims.jti)
 
         if stored is None:
-            raise RevokedToken("Refresh token not found")
+            raise RevokedToken('Refresh token not found')
 
         if stored.user_id != claims.sub or stored.family_id != claims.family_id:
-            raise MalformedToken("Refresh token does not match the stored session")
+            raise MalformedToken('Refresh token does not match the stored session')
 
         if stored.revoked_at is not None:
             # Un token ya rotado que vuelve a llegar: alguien más lo tiene.
             self.store.revoke_family(claims.family_id)
-            raise RefreshTokenReused("Refresh token reuse detected")
+            raise RefreshTokenReused('Refresh token reuse detected')
 
         user = self.user_repository.get_by_id(claims.sub)
         if user is None:
             self.store.revoke_family(claims.family_id)
-            raise RevokedToken("Session is no longer valid")
+            raise RevokedToken('Session is no longer valid')
 
         if not user.can_login:
             self.store.revoke_family(claims.family_id)
             if user.status is UserStatus.PENDING:
-                raise AccountNotVerified("Email not verified")
-            raise AccountDisabled("Account disabled")
+                raise AccountNotVerified('Email not verified')
+            raise AccountDisabled('Account disabled')
 
         new_refresh = self.tokens.create_refresh(user.id, claims.family_id)
 
         # Atómico: si dos peticiones usan el mismo token a la vez, solo una gana.
         if not self.store.rotate(claims.jti, new_refresh.jti):
             self.store.revoke_family(claims.family_id)
-            raise RefreshTokenReused("Refresh token reuse detected")
+            raise RefreshTokenReused('Refresh token reuse detected')
 
         self.store.save(new_refresh.jti, user.id, claims.family_id, new_refresh.expires_at)
 

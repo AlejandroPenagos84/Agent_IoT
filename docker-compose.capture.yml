@@ -1,28 +1,94 @@
-# Captura en el servidor del cliente (alternativa al `docker run` que muestra la web).
+# Captura en el servidor del cliente (alternativa al `docker run` de la web).
 #
 #   ENROLL_KEY=ek_... API_URL=https://api.tudominio.com \
 #     docker compose -f docker-compose.capture.yml up -d
 #
 # La captura comparte la red del contenedor de Mosquitto (MOSQUITTO_CONTAINER),
-# se inscribe sola con la clave del broker y guarda su identidad en el volumen
-# `capture-state`. Solo hace conexiones de salida: API (443) y agente (8443).
+# se inscribe con la clave del broker y guarda su identidad en `capture-state`.
+# Solo abre conexiones de salida: API (443) y agente (8443).
+#
+# Perfil `lab`: añade un Mosquitto y el simulador unidos a la red de la
+# central local, para probar todo en una sola máquina (ver README).
+name: agentiot-capture
+
 services:
   capture:
-    image: ${CAPTURE_IMAGE:-ghcr.io/agentiot/capture:latest}
+    image: ${CAPTURE_IMAGE:-agentiot-capture:latest}
     build:
       context: .
       dockerfile: Dockerfile.capture
-    container_name: agentiot-capture
     network_mode: "container:${MOSQUITTO_CONTAINER:-mosquitto}"
     cap_add:
       - NET_RAW
-    command: ["--iface", "${CAPTURE_IFACE:-eth0}", "--exclude-topic", "alertas/deteccion"]
+    command: ["--iface", "${CAPTURE_IFACE:-eth0}"]
     environment:
       ENROLL_KEY: ${ENROLL_KEY:?pega la clave de inscripción del broker}
-      API_URL: ${API_URL:?define la URL pública de la API}
+      API_URL: ${API_URL:?define la URL de la API}
     volumes:
       - capture-state:/state
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+        required: false
     restart: unless-stopped
+
+  # ------------------------------------------------------------- laboratorio
+  certgen:
+    image: alpine:3.20
+    profiles: ["lab"]
+    command: ["/bin/sh", "/certgen.sh"]
+    environment:
+      MOSQUITTO_CERT_DIR: /mosquitto-certs
+    volumes:
+      - ./deploy/certgen.sh:/certgen.sh:ro,z
+      - ${MOSQUITTO_CERT_HOST_DIR:-./mosquitto/certs}:/mosquitto-certs:z
+    restart: "no"
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    profiles: ["lab"]
+    container_name: ${MOSQUITTO_CONTAINER:-mosquitto}
+    networks:
+      # La red del laboratorio debe ser eth0, que es la que escucha la captura;
+      # la de la central (eth1) solo da ruta hacia app:8000 y app:8443.
+      default:
+        priority: 100
+      central:
+        priority: 10
+    ports:
+      - "127.0.0.1:${MQTT_PORT:-1883}:1883"
+      - "127.0.0.1:${MQTTS_PORT:-8883}:8883"
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro,z
+      - ${MOSQUITTO_CERT_HOST_DIR:-./mosquitto/certs}:/mosquitto/certs:ro,z
+      - mosquitto-log:/mosquitto/log
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -i healthcheck -t '$$SYS/broker/uptime' -C 1 -W 3 >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      certgen:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  simulador:
+    image: agentiot-app:latest
+    profiles: ["lab"]
+    command: ["python", "-m", "simulation", "--broker", "mosquitto", "--port", "1883",
+              "--ataque", "${ATAQUE:-dos}", "--dos-mode", "${DOS_MODE:-flood}",
+              "--paquetes", "${PAQUETES:-30000}"]
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    restart: "no"
+
+networks:
+  # Red de la central local (`docker compose up` del docker-compose.yml).
+  central:
+    name: ${CENTRAL_NETWORK:-agent_iot_default}
+    external: true
 
 volumes:
   capture-state:
+  mosquitto-log:

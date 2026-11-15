@@ -19,16 +19,18 @@ def parse_instant(value: str | None, name: str) -> float | None:
         number = None
     if number is not None:
         if not math.isfinite(number):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                                detail=f'{name} debe ser un número finito')
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=f'{name} debe ser un número finito'
+            )
         return number
     try:
         parsed = datetime.fromisoformat(candidate.replace('Z', '+00:00'))
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f'{name} debe ser epoch o ISO-8601') from exc
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f'{name} debe ser epoch o ISO-8601'
+        ) from exc
     if parsed.tzinfo is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=f'{name} debe incluir zona horaria')
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f'{name} debe incluir zona horaria'
+        )
     return parsed.timestamp()

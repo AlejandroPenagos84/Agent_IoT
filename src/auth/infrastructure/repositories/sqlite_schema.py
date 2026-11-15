@@ -28,8 +28,8 @@ CREATE INDEX IF NOT EXISTS ix_refresh_tokens_family ON refresh_tokens (family_id
 def connect(path: str) -> sqlite3.Connection:
     """Abre la base, activa WAL, espera ante bloqueos y crea las tablas."""
     conn = sqlite3.connect(path, check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=5000")
-    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute('PRAGMA busy_timeout=5000')
+    conn.execute('PRAGMA foreign_keys=ON')
     conn.executescript(SCHEMA)
     return conn

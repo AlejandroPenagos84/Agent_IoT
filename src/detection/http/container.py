@@ -7,12 +7,18 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from detection.application.ports.identity_provider import IdentityProvider
+from detection.application.use_cases.ingest_alert import IngestAlert
 from detection.http.onboarding import OnboardingConfig
+from detection.infrastructure.repositories.alert_repository_sqlite import (
+    SqliteAlertRepository,
+)
 from detection.infrastructure.repositories.registry_sqlite import (
     RegistryStore,
     connect,
 )
 from detection.infrastructure.sensor_tokens import SensorTokenService
+from detection.infrastructure.sinks.daily_file_alert import DailyFileAlertSink
 
 
 def _env_int(name: str, default: int) -> int:
@@ -32,6 +38,9 @@ class RegistryContainer:
     sensor_tokens: SensorTokenService | None
     jwt_secret: str | None
     alerts_dir: Path
+    ingest: IngestAlert
+    # Puerto hacia auth: lo inyecta el composition root de src/app.
+    identity: IdentityProvider | None = None
     onboarding: OnboardingConfig = field(default_factory=OnboardingConfig)
 
     def close(self) -> None:
@@ -45,18 +54,25 @@ def build_container(
     alerts_dir: str | Path | None = None,
     sensor_ttl_minutes: int | None = None,
     onboarding: OnboardingConfig | None = None,
+    identity: IdentityProvider | None = None,
 ) -> RegistryContainer:
-    secret = jwt_secret if jwt_secret is not None else os.getenv("AUTH_JWT_SECRET")
-    path = db_path or os.getenv("DETECTION_DB_PATH", ":memory:")
-    directory = Path(alerts_dir or os.getenv("ALERTS_DIR", "/alerts"))
-    ttl = sensor_ttl_minutes if sensor_ttl_minutes is not None else _env_int(
-        "SENSOR_TOKEN_TTL_MINUTES", 1440)
+    secret = jwt_secret if jwt_secret is not None else os.getenv('AUTH_JWT_SECRET')
+    path = db_path or os.getenv('DETECTION_DB_PATH', ':memory:')
+    directory = Path(alerts_dir or os.getenv('ALERTS_DIR', '/alerts'))
+    ttl = (
+        sensor_ttl_minutes
+        if sensor_ttl_minutes is not None
+        else _env_int('SENSOR_TOKEN_TTL_MINUTES', 1440)
+    )
     connection = connect(path)
+    store = RegistryStore(connection)
     return RegistryContainer(
         connection=connection,
-        store=RegistryStore(connection),
+        store=store,
         sensor_tokens=SensorTokenService(secret, ttl) if secret else None,
         jwt_secret=secret,
         alerts_dir=directory,
+        ingest=IngestAlert(SqliteAlertRepository(store), DailyFileAlertSink(directory)),
+        identity=identity,
         onboarding=onboarding or OnboardingConfig.from_env(),
     )

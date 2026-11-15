@@ -20,9 +20,11 @@ COPY requirements.txt /app/requirements.txt
 RUN python -m pip install --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r /app/requirements.txt
 
-# Copy project files
-COPY . /app
+# Código de la app, modelos exportados y el simulador del laboratorio.
+COPY src /app/src
+COPY modelos_agente_tcp /app/modelos_agente_tcp
+COPY simulation /app/simulation
 
-# Run the simulator by default. Arguments can be overridden at run time.
-ENTRYPOINT ["python", "-m", "simulation"]
-CMD ["--broker", "mosquitto", "--port", "1883", "--ataque", "dos", "--paquetes", "60"]
+EXPOSE 8000 8443
+# API (auth + detección) y agente en un solo proceso.
+CMD ["python", "-m", "app"]

@@ -2,21 +2,24 @@ from __future__ import annotations
 
 import os
 import ssl
-import sys
-import threading
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 from detection.application import Agent, BrokerPool, DetectionServer
+from detection.application.use_cases.ingest_alert import IngestAlert
 from detection.infrastructure.classifiers import TcpXgbClassifier
+from detection.infrastructure.sensor_tokens import SensorTokenService
 from detection.infrastructure.sinks import (
     CompositeAlertSink,
-    DailyFileAlertSink,
     FileEvidenceSink,
-    HttpAlertSink,
+    IngestAlertSink,
     MqttAlertSink,
 )
-from detection.infrastructure.tshark.async_socket_server import AsyncSocketServer
+from detection.infrastructure.transport import (
+    AsyncSocketServer,
+    CertificateReloader,
+    server_ssl_context,
+)
 
 BINARY_LABELS = {'normal', 'ataque'}
 
@@ -24,15 +27,16 @@ BINARY_LABELS = {'normal', 'ataque'}
 @dataclass
 class AgentConfig:
     """Runtime settings used to assemble the detector application."""
+
     capture_endpoint: str = 'unix:///capture/features.sock'
     model_dir: str | None = None
-    broker_host: str = 'localhost'
+    # Publicación opcional de alertas por MQTT; None = sin MQTT.
+    broker_host: str | None = None
     username: str | None = None
     password: str | None = None
     normal_labels: Sequence[str] = ('normal',)
     alert_port: int = 1883
     alert_topic: str = 'alertas/deteccion'
-    alert_dir: str = '/alerts'
     evidence_dir: str = '/evidence'
     evidence_seconds: float = 30.0
     evidence_max_bytes: int = 500 * 1024 * 1024
@@ -47,111 +51,67 @@ class AgentConfig:
     tls_cert: str | None = None
     tls_key: str | None = None
     tls_ca: str | None = None
-    jwt_secret: str | None = None
     require_sensor_token: bool = True
-    # Alertas hacia la API Python (HTTPS o HTTP interno).
-    alert_api_url: str | None = None
-    alert_api_token: str | None = None
-    alert_api_ca: str | None = None
+
+    @classmethod
+    def from_env(cls) -> AgentConfig:
+        """Read the agent settings from ``AGENT_*`` environment variables."""
+        env = os.getenv
+        return cls(
+            capture_endpoint=env('CAPTURE_ENDPOINT', cls.capture_endpoint),
+            model_dir=env('MODEL_DIR') or None,
+            broker_host=env('ALERT_MQTT_HOST') or None,
+            alert_port=int(env('ALERT_MQTT_PORT', '1883')),
+            username=env('ALERT_MQTT_USERNAME') or None,
+            password=env('ALERT_MQTT_PASSWORD') or None,
+            alert_topic=env('ALERT_MQTT_TOPIC', cls.alert_topic),
+            evidence_dir=env('EVIDENCE_DIR', cls.evidence_dir),
+            tls_cert=env('TLS_CERT') or None,
+            tls_key=env('TLS_KEY') or None,
+            tls_ca=env('TLS_CA') or None,
+        )
 
 
-'''
+"""
 Composition root: the single place where the concrete adapters are assembled and
 injected into the Agent. No selection logic; just wiring.
-'''
-
-
-class CertificateReloader:
-    """Reload the server certificate when the files change (ACME renewals).
-
-    ``SSLContext.load_cert_chain`` on the live context applies to new
-    handshakes, so renewed certificates are used without restarting.
-    """
-
-    def __init__(self, context: ssl.SSLContext, cert: str, key: str,
-                 interval: float = 3600.0):
-        self.context, self.cert, self.key = context, cert, key
-        self.interval = interval
-        self._mtime = self._stamp()
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, name='cert-reload',
-                                        daemon=True)
-
-    def _stamp(self) -> tuple[float, float]:
-        try:
-            return os.path.getmtime(self.cert), os.path.getmtime(self.key)
-        except OSError:
-            return (0.0, 0.0)
-
-    def check(self) -> bool:
-        stamp = self._stamp()
-        if stamp == self._mtime or stamp == (0.0, 0.0):
-            return False
-        try:
-            self.context.load_cert_chain(self.cert, self.key)
-        except (OSError, ssl.SSLError) as exc:
-            print(f'[agente] no se pudo recargar el certificado: {exc}',
-                  file=sys.stderr, flush=True)
-            return False
-        self._mtime = stamp
-        print('[agente] certificado TLS recargado', file=sys.stderr, flush=True)
-        return True
-
-    def start(self) -> None:
-        self._thread.start()
-
-    def _run(self) -> None:
-        while not self._stop.wait(self.interval):
-            self.check()
-
-    def close(self) -> None:
-        self._stop.set()
+"""
 
 
 def _server_ssl_context(cfg: AgentConfig) -> ssl.SSLContext | None:
-    if not cfg.capture_endpoint.startswith('tls://'):
-        return None
-    if not (cfg.tls_cert and cfg.tls_key):
-        raise ValueError('El endpoint TLS requiere TLS_CERT y TLS_KEY')
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.load_cert_chain(cfg.tls_cert, cfg.tls_key)
-    if cfg.tls_ca:
-        context.load_verify_locations(cafile=cfg.tls_ca)
-    return context
+    return server_ssl_context(cfg.capture_endpoint, cfg.tls_cert, cfg.tls_key, cfg.tls_ca)
 
 
-def _alert_api_token(cfg: AgentConfig):
-    """Fixed ALERT_API_TOKEN, or an agent token renewed from AUTH_JWT_SECRET."""
-    if cfg.alert_api_token:
-        return cfg.alert_api_token
-    secret = cfg.jwt_secret or os.getenv('AUTH_JWT_SECRET')
-    if not secret:
-        raise ValueError('ALERT_API_URL requiere ALERT_API_TOKEN o AUTH_JWT_SECRET')
-    from detection.infrastructure.sensor_tokens import RenewingAgentToken
+def build_agent(
+    cfg: AgentConfig, ingest: IngestAlert, sensor_tokens: SensorTokenService | None = None
+) -> DetectionServer:
+    """Build the transport, the per-broker pool and its shared sinks.
 
-    return RenewingAgentToken(secret)
-
-
-def build_agent(cfg: AgentConfig) -> DetectionServer:
-    """Build the transport, the per-broker pool and its shared sinks."""
+    ``ingest`` is the same use case the API uses, so alerts go straight to the
+    database and the daily journal, in-process. ``sensor_tokens`` validates the
+    hello frame on ``tls://`` endpoints.
+    """
     probe = TcpXgbClassifier(model_dir=cfg.model_dir)
     class_names = set(getattr(probe, 'cfg', {}).get('class_names', []))
     if class_names != BINARY_LABELS:
-        raise ValueError('El agente espera artefactos binarios normal/ataque; '
-                         f'pipeline_config.json declara {sorted(class_names)}. '
-                         'Reentrena y exporta desde 03_modelo_tcp.ipynb.')
-    sinks = [
-        MqttAlertSink(cfg.broker_host, port=cfg.alert_port,
-                      topic=cfg.alert_topic, username=cfg.username,
-                      password=cfg.password),
-        DailyFileAlertSink(cfg.alert_dir),
-    ]
-    if cfg.alert_api_url:
-        sinks.append(HttpAlertSink(cfg.alert_api_url, _alert_api_token(cfg),
-                                   tls_ca=cfg.alert_api_ca))
+        raise ValueError(
+            'El agente espera artefactos binarios normal/ataque; '
+            f'pipeline_config.json declara {sorted(class_names)}. '
+            'Reentrena y exporta desde 03_modelo_tcp.ipynb.'
+        )
+    sinks = [IngestAlertSink(ingest)]
+    if cfg.broker_host:
+        sinks.append(
+            MqttAlertSink(
+                cfg.broker_host,
+                port=cfg.alert_port,
+                topic=cfg.alert_topic,
+                username=cfg.username,
+                password=cfg.password,
+            )
+        )
     sink = CompositeAlertSink(sinks)
-    evidence = FileEvidenceSink(cfg.evidence_dir,
-                                max_bytes=cfg.evidence_max_bytes)
+    evidence = FileEvidenceSink(cfg.evidence_dir, max_bytes=cfg.evidence_max_bytes)
     cooldown = 5.0 if cfg.alert_cooldown is None else cfg.alert_cooldown
 
     def agent_factory(source):
@@ -169,19 +129,18 @@ def build_agent(cfg: AgentConfig) -> DetectionServer:
             server_ports=(1883, 8883),
         )
 
-    pool = BrokerPool(agent_factory, max_workers=cfg.max_workers,
-                      queue_size=cfg.queue_size,
-                      idle_seconds=cfg.worker_idle_seconds)
-    require_token = (cfg.require_sensor_token
-                     and cfg.capture_endpoint.startswith('tls://'))
+    pool = BrokerPool(
+        agent_factory,
+        max_workers=cfg.max_workers,
+        queue_size=cfg.queue_size,
+        idle_seconds=cfg.worker_idle_seconds,
+    )
+    require_token = cfg.require_sensor_token and cfg.capture_endpoint.startswith('tls://')
     validator = None
     if require_token:
-        from detection.infrastructure.sensor_tokens import SensorTokenService
-
-        secret = cfg.jwt_secret or os.getenv('AUTH_JWT_SECRET')
-        if not secret:
+        if sensor_tokens is None:
             raise ValueError('El endpoint TLS requiere AUTH_JWT_SECRET')
-        validator = SensorTokenService(secret).decode
+        validator = sensor_tokens.decode
     ssl_context = _server_ssl_context(cfg)
     closeables: list = [sink]
     if ssl_context is not None:

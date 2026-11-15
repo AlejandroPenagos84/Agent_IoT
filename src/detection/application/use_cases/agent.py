@@ -1,182 +1,95 @@
+"""Caso de uso: detectar sobre un stream de frames y emitir las alertas anómalas."""
+
 from __future__ import annotations
 
-import uuid
-from collections import deque
-from typing import Sequence
+from collections.abc import Sequence
 
-from detection.application.ports.ports_out import Classifier, FeatureSource
-from detection.application.ports.ports_out import AlertSink, EvidenceSink
-from detection.domain.model import ALERT_KIND_CLASS, Alert, FrameContext
+from detection.application.ports.ports_out import AlertSink, Classifier, EvidenceSink, FeatureSource
+from detection.application.ports.types import Frame
+from detection.application.services.evidence_buffer import EvidenceBuffer
+from detection.application.services.sliding_windows import SlidingWindows
+from detection.domain.alert_cooldown import AlertCooldown
+from detection.domain.alert_factory import build_alert
 
 DEFAULT_WINDOW = 11
 DEFAULT_NORMAL_LABELS = ('normal',)
 DEFAULT_EVIDENCE_SECONDS = 30.0
-MAX_EVIDENCE_FLOWS = 4096
-MAX_EVIDENCE_RECORDS = 10_000
-
-
-'''
-Orchestrator: consumes frames from the FeatureSource, builds the sliding
-window, asks the Classifier and emits an Alert for non-normal labels.
-'''
 
 
 class Agent:
-    """Run detection over a frame stream and emit anomalous classifications."""
-    def __init__(self, source: FeatureSource, classifier: Classifier,
-                 sink: AlertSink,
-                 window_size: int = DEFAULT_WINDOW,
-                 normal_labels: Sequence[str] = DEFAULT_NORMAL_LABELS,
-                 source_name: str = 'agente',
-                 per_flow: bool = True,
-                 alert_cooldown: float = 0.0,
-                 server_ports: Sequence[int] = (),
-                 evidence_sink: EvidenceSink | None = None,
-                 evidence_seconds: float = DEFAULT_EVIDENCE_SECONDS):
-        """Create the use case with its driven ports injected."""
+    """Coordina la detección; cada decisión la toma una pieza:
+
+    - ``SlidingWindows``: arma la ventana (global o por sentido de cada flujo).
+    - ``Classifier``: etiqueta la ventana.
+    - ``AlertCooldown``: suprime la misma etiqueta repetida en la misma conexión.
+    - ``build_alert``: arma la alerta reportando al cliente, no al broker.
+    - ``EvidenceBuffer``: guarda los frames recientes y los escribe con la alerta.
+    """
+
+    def __init__(
+        self,
+        source: FeatureSource,
+        classifier: Classifier,
+        sink: AlertSink,
+        window_size: int = DEFAULT_WINDOW,
+        normal_labels: Sequence[str] = DEFAULT_NORMAL_LABELS,
+        source_name: str = 'agente',
+        per_flow: bool = True,
+        alert_cooldown: float = 0.0,
+        server_ports: Sequence[int] = (),
+        evidence_sink: EvidenceSink | None = None,
+        evidence_seconds: float = DEFAULT_EVIDENCE_SECONDS,
+    ):
+        """
+        ``alert_cooldown``: segundos (tiempo de captura) sin repetir la misma
+        etiqueta para la misma conexión; 0 = una alerta por ventana anómala.
+        ``server_ports``: puertos del broker, para que la alerta reporte al
+        cliente aunque el frame sea una respuesta broker -> cliente.
+        """
         self.source = source
         self.classifier = classifier
         self.sink = sink
-        self.window_size = window_size
         self.normal_labels = set(normal_labels)
         self.source_name = source_name
-        self.per_flow = per_flow
-        # Segundos (tiempo de captura) sin repetir la misma etiqueta para el mismo
-        # flujo; 0 = una alerta por ventana anómala.
-        self.alert_cooldown = alert_cooldown
-        # Puertos del servidor (broker): la alerta reporta al cliente, no al broker,
-        # aunque el frame sea una respuesta broker -> cliente.
-        self.server_ports = set(server_ports)
-        self.evidence_sink = evidence_sink
-        self.evidence_seconds = evidence_seconds
-        self._last_alert: dict = {}
-        self._evidence: dict = {}
+        self.server_ports = frozenset(server_ports)
+        self.windows = SlidingWindows(window_size, per_flow=per_flow)
+        self.cooldown = AlertCooldown(alert_cooldown)
+        self.evidence = EvidenceBuffer(evidence_sink, evidence_seconds)
         self.emitted = 0
 
-    def _emit(self, label: str, context: FrameContext) -> None:
-        """Build and deliver an alert enriched with frame context."""
-        ip = context.ip
-        if context.srcport in self.server_ports and context.dst_ip:
-            ip = context.dst_ip
-        alert = Alert(
-            ts=context.ts or 0.0, kind=ALERT_KIND_CLASS, label=label,
-            client_id=context.client_id, ip=ip,
-            topic=context.topic, source=self.source_name,
-            alert_id=str(uuid.uuid4()),
-            tenant_id=context.tenant_id, broker_id=context.broker_id,
-            sensor_id=context.sensor_id)
-        self.sink.emit(alert)
-        self._write_evidence(alert, context)
-        self.emitted += 1
-
-    def _remember_evidence(self, context: FrameContext, record: dict | None) -> None:
-        """Keep the raw frames of the last seconds for the connection."""
-        if self.evidence_sink is None or record is None:
-            return
-        key = self._connection_key(context)
-        buffer = self._evidence.get(key)
-        if buffer is None:
-            if len(self._evidence) >= MAX_EVIDENCE_FLOWS:
-                self._evidence.pop(next(iter(self._evidence)))
-            buffer = self._evidence[key] = deque(maxlen=MAX_EVIDENCE_RECORDS)
-        ts = context.ts
-        if ts is not None:
-            cutoff = ts - self.evidence_seconds
-            while buffer and buffer[0][0] is not None and buffer[0][0] < cutoff:
-                buffer.popleft()
-        buffer.append((ts, record))
-
-    def _write_evidence(self, alert: Alert, context: FrameContext) -> None:
-        """Persist the buffered frames for the connection that raised the alert."""
-        if self.evidence_sink is None:
-            return
-        key = self._connection_key(context)
-        buffer = self._evidence.get(key)
-        if not buffer:
-            return
-        cutoff = (context.ts - self.evidence_seconds
-                  if context.ts is not None else None)
-        records = [record for ts, record in buffer
-                   if cutoff is None or ts is None or ts >= cutoff]
-        if records:
-            self.evidence_sink.write(alert, key, records)
-
-    @staticmethod
-    def _connection_key(context: FrameContext):
-        """One TCP connection is isolated per tenant, broker and sensor."""
-        endpoints = tuple(sorted(((str(context.ip), context.srcport),
-                                  (str(context.dst_ip), context.dstport))))
-        identity = (context.tenant_id, context.broker_id, context.sensor_id)
-        return identity, context.stream_id, endpoints
-
-    def _cooling_down(self, key, label: str, context: FrameContext) -> bool:
-        """True if this connection already raised ``label`` within the cooldown.
-
-        The handshake comes before CONNECT, so the first alert may lack client_id;
-        once it is known, one more alert is allowed with the identity.
-        """
-        if self.alert_cooldown <= 0 or context.ts is None:
-            return False
-        key = (self._connection_key(context), context.client_id is not None)
-        last = self._last_alert.get((key, label))
-        if last is not None and context.ts - last < self.alert_cooldown:
-            return True
-        self._last_alert[(key, label)] = context.ts
-        if len(self._last_alert) > 65536:
-            self._last_alert.pop(next(iter(self._last_alert)))
-        return False
-
-    def _classify_and_emit(self, window, context: FrameContext, key=None) -> None:
-        """Classify a full window and suppress configured normal labels."""
-        labels = self.classifier.predict(window)
-        if not labels:
-            return
-        label = labels[-1]
-        if label not in self.normal_labels and not self._cooling_down(key, label, context):
-            self._emit(label, context)
-
-    def _consume_frames(self) -> None:
-        """Read frames and maintain one global or per-flow buffer."""
-        if not self.per_flow:
-            buffer: deque = deque(maxlen=self.window_size)
-            for frame in self.source.rows():
-                self._remember_evidence(frame.context, frame.record)
-                buffer.append(frame.features)
-                if len(buffer) < self.window_size:
-                    continue
-                self._classify_and_emit(list(buffer), frame.context)
-            return
-        buffers: dict = {}
-        for frame in self.source.rows():
-            context = frame.context
-            # Directional connection: broker replies to different clients must
-            # never share a buffer merely because their source port is 1883.
-            # tcp.stream also separates successive connections reusing ports.
-            if (not context.ip or not context.dst_ip
-                    or not context.srcport or not context.dstport):
-                continue
-            self._remember_evidence(context, frame.record)
-            key = (context.tenant_id, context.broker_id, context.sensor_id,
-                   context.stream_id, context.ip, context.srcport,
-                   context.dst_ip, context.dstport)
-            buf = buffers.get(key)
-            if buf is None:
-                buf = buffers[key] = deque(maxlen=self.window_size)
-            buf.append(frame.features)
-            if len(buf) < self.window_size:
-                continue
-            self._classify_and_emit(list(buf), frame.context, key)
-
     def run(self) -> None:
-        """Start the source, consume frames, and stop it on exit."""
+        """Arranca la fuente, consume frames y la detiene al salir."""
         self.source.start()
         try:
-            self._consume_frames()
+            for frame in self.source.rows():
+                self.process(frame)
         except KeyboardInterrupt:
             pass
         finally:
             self.stop()
 
     def stop(self) -> None:
-        """Stop the injected frame source."""
         self.source.stop()
+
+    def process(self, frame: Frame) -> None:
+        """Un frame: evidencia -> ventana -> clasificación -> alerta."""
+        context = frame.context
+        if not self.windows.accepts(context):
+            return
+
+        self.evidence.remember(context, frame.record)
+        window = self.windows.push(context, frame.features)
+        if window is None:
+            return
+
+        labels = self.classifier.predict(window)
+        if not labels:
+            return
+        label = labels[-1]
+        if label in self.normal_labels or self.cooldown.should_suppress(label, context):
+            return
+
+        alert = build_alert(label, context, source=self.source_name, server_ports=self.server_ports)
+        self.sink.emit(alert)
+        self.evidence.flush(alert, context)
+        self.emitted += 1

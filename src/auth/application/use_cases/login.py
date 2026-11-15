@@ -10,8 +10,13 @@ from auth.domain.user import UserStatus
 
 
 class LoginUseCase:
-    def __init__(self, users: UserRepository, hasher: PasswordHasher,
-                 tokens: TokenService, store: RefreshTokenStore) -> None:
+    def __init__(
+        self,
+        users: UserRepository,
+        hasher: PasswordHasher,
+        tokens: TokenService,
+        store: RefreshTokenStore,
+    ) -> None:
         self._users = users
         self._hasher = hasher
         self._tokens = tokens
@@ -20,12 +25,12 @@ class LoginUseCase:
     def execute(self, email: str, password: str) -> TokenPair:
         user = self._users.get_by_email(email)
         if user is None or not self._hasher.verify(password, user.hashed_password):
-            raise InvalidCredentials("Invalid email or password")
+            raise InvalidCredentials('Invalid email or password')
 
         if user.status is UserStatus.PENDING:
-            raise AccountNotVerified("Email not verified")
+            raise AccountNotVerified('Email not verified')
         if user.status is not UserStatus.ACTIVE:
-            raise AccountDisabled("Account disabled")
+            raise AccountDisabled('Account disabled')
 
         access_token = self._tokens.create_access(user.id)
         family_id = str(uuid4())

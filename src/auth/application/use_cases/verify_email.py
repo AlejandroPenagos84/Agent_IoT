@@ -11,8 +11,9 @@ from auth.domain.user import User, UserStatus
 class VerifyEmail:
     """Valida el código y pasa la cuenta de PENDING a ACTIVE."""
 
-    def __init__(self, users: UserRepository, codes: VerificationCodeStore,
-                 hasher: PasswordHasher) -> None:
+    def __init__(
+        self, users: UserRepository, codes: VerificationCodeStore, hasher: PasswordHasher
+    ) -> None:
         self.users = users
         self.codes = codes
         self.hasher = hasher
@@ -22,12 +23,12 @@ class VerifyEmail:
         stored = self.codes.get(email)
         # Mismo mensaje en todos los casos para no revelar si el correo existe.
         if user is None or user.status is not UserStatus.PENDING or stored is None:
-            raise InvalidCode("Code is invalid or expired")
+            raise InvalidCode('Code is invalid or expired')
 
         if not self.hasher.verify(code, stored):
             if self.codes.register_failure(email) >= MAX_ATTEMPTS:
                 self.codes.delete(email)  # obliga a pedir un código nuevo
-            raise InvalidCode("Code is invalid or expired")
+            raise InvalidCode('Code is invalid or expired')
 
         self.codes.delete(email)
         active = replace(user, status=UserStatus.ACTIVE)

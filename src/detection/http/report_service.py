@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from detection.infrastructure.repositories.registry_sqlite import RegistryStore
@@ -29,7 +29,7 @@ class ScopedReportService:
         ollama_url: str,
         default_model: str,
         timeout: float,
-        output_timezone: str = "UTC",
+        output_timezone: str = 'UTC',
     ) -> None:
         self._store = store
         self._ollama_url = ollama_url
@@ -37,47 +37,59 @@ class ScopedReportService:
         self._timeout = timeout
         self._timezone = output_timezone
 
-    def _alerts(self, tenant_id: str, broker_id: str | None,
-                end: datetime) -> list[dict]:
+    def _alerts(self, tenant_id: str, broker_id: str | None, end: datetime) -> list[dict]:
         until = end.timestamp() + _EPSILON
         alerts = self._store.list_alerts(
-            tenant_id, limit=None, broker_id=broker_id,
-            since=(end - WINDOW).timestamp(), until=until)
+            tenant_id,
+            limit=None,
+            broker_id=broker_id,
+            since=(end - WINDOW).timestamp(),
+            until=until,
+        )
         if alerts:
             return alerts
         # Historical fallback: the 24 hours ending at the latest older alert.
-        latest = self._store.list_alerts(
-            tenant_id, limit=1, broker_id=broker_id, until=until)
+        latest = self._store.list_alerts(tenant_id, limit=1, broker_id=broker_id, until=until)
         if not latest:
             return []
-        last_ts = float(latest[0]["ts"])
+        last_ts = float(latest[0]['ts'])
         return self._store.list_alerts(
-            tenant_id, limit=None, broker_id=broker_id,
-            since=last_ts - WINDOW.total_seconds(), until=last_ts + _EPSILON)
+            tenant_id,
+            limit=None,
+            broker_id=broker_id,
+            since=last_ts - WINDOW.total_seconds(),
+            until=last_ts + _EPSILON,
+        )
 
-    def analytical(self, tenant_id: str, *, broker_id: str | None = None,
-                   now: datetime | None = None) -> dict[str, Any]:
-        brokers = {broker["id"]: broker["name"]
-                   for broker in self._store.list_brokers(tenant_id)}
+    def analytical(
+        self, tenant_id: str, *, broker_id: str | None = None, now: datetime | None = None
+    ) -> dict[str, Any]:
+        brokers = {broker['id']: broker['name'] for broker in self._store.list_brokers(tenant_id)}
         if broker_id is not None and broker_id not in brokers:
-            raise LookupError("Broker no encontrado")
-        end = now or datetime.now(timezone.utc)
+            raise LookupError('Broker no encontrado')
+        end = now or datetime.now(UTC)
         alerts = self._alerts(tenant_id, broker_id, end)
         if not alerts:
-            raise ValueError("No hay alertas para este tenant o broker")
-        scope = {"tenant_id": tenant_id, "broker_id": broker_id,
-                 "broker_name": brokers.get(broker_id) if broker_id else None}
+            raise ValueError('No hay alertas para este tenant o broker')
+        scope = {
+            'tenant_id': tenant_id,
+            'broker_id': broker_id,
+            'broker_name': brokers.get(broker_id) if broker_id else None,
+        }
         return build_scoped_report(
-            alerts, scope=scope, now=end, output_timezone=self._timezone,
-            broker_names=brokers)
+            alerts, scope=scope, now=end, output_timezone=self._timezone, broker_names=brokers
+        )
 
-    def natural(self, analytical_report: dict[str, Any],
-                model: str | None = None) -> str:
+    def natural(self, analytical_report: dict[str, Any], model: str | None = None) -> str:
         # The internal tenant id adds nothing to the narrative.
-        payload = {**analytical_report,
-                   "scope": {key: value for key, value in
-                             analytical_report.get("scope", {}).items()
-                             if key != "tenant_id"}}
+        payload = {
+            **analytical_report,
+            'scope': {
+                key: value
+                for key, value in analytical_report.get('scope', {}).items()
+                if key != 'tenant_id'
+            },
+        }
         return generate_report(
             payload,
             base_url=self._ollama_url,

@@ -37,11 +37,11 @@ def sqlite_errors():
     except AuthError:
         raise
     except sqlite3.IntegrityError as exc:
-        raise DuplicateRecord("A record with the same unique fields already exists") from exc
+        raise DuplicateRecord('A record with the same unique fields already exists') from exc
     except (sqlite3.OperationalError, sqlite3.ProgrammingError) as exc:
-        raise DatabaseUnavailable("Database is unavailable") from exc
+        raise DatabaseUnavailable('Database is unavailable') from exc
     except sqlite3.Error as exc:
-        raise PersistenceError("Database operation failed") from exc
+        raise PersistenceError('Database operation failed') from exc
 
 
 @contextmanager
@@ -53,4 +53,4 @@ def redis_errors():
     except AuthError:
         raise
     except redis.RedisError as exc:
-        raise CodeStoreUnavailable("Verification code store is unavailable") from exc
+        raise CodeStoreUnavailable('Verification code store is unavailable') from exc

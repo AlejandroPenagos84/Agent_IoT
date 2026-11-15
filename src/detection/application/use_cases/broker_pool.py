@@ -7,7 +7,7 @@ import logging
 import queue
 import threading
 import time
-from typing import Callable
+from collections.abc import Callable
 
 from detection.application.ports.ports_out import FeatureSource
 from detection.application.ports.types import Frame
@@ -64,14 +64,12 @@ class QueueFeatureSource(FeatureSource):
 class BrokerWorker:
     """One Agent and one bounded queue for a single broker."""
 
-    def __init__(self, key: tuple[str, str], source: QueueFeatureSource,
-                 agent: Agent):
+    def __init__(self, key: tuple[str, str], source: QueueFeatureSource, agent: Agent):
         self.key = key
         self.source = source
         self.agent = agent
         self.last_activity = time.monotonic()
-        self.thread = threading.Thread(target=self._run, name=f'broker-{key}',
-                                       daemon=True)
+        self.thread = threading.Thread(target=self._run, name=f'broker-{key}', daemon=True)
 
     def start(self) -> None:
         self.thread.start()
@@ -107,11 +105,14 @@ class BrokerPool:
     broker's connection is backpressured.
     """
 
-    def __init__(self, agent_factory: Callable[[FeatureSource], Agent],
-                 max_workers: int = DEFAULT_MAX_WORKERS,
-                 queue_size: int = DEFAULT_QUEUE_SIZE,
-                 idle_seconds: float = DEFAULT_IDLE_SECONDS,
-                 reap_interval: float = DEFAULT_REAP_INTERVAL):
+    def __init__(
+        self,
+        agent_factory: Callable[[FeatureSource], Agent],
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        queue_size: int = DEFAULT_QUEUE_SIZE,
+        idle_seconds: float = DEFAULT_IDLE_SECONDS,
+        reap_interval: float = DEFAULT_REAP_INTERVAL,
+    ):
         self.agent_factory = agent_factory
         self.max_workers = max_workers
         self.queue_size = queue_size
@@ -134,8 +135,9 @@ class BrokerPool:
         if self._monitor is not None and self._monitor.is_alive():
             return
         self._stop.clear()
-        self._monitor = threading.Thread(target=self._monitor_loop,
-                                         name='broker-reaper', daemon=True)
+        self._monitor = threading.Thread(
+            target=self._monitor_loop, name='broker-reaper', daemon=True
+        )
         self._monitor.start()
 
     def _get(self, key: tuple[str, str]) -> BrokerWorker | None:
@@ -192,9 +194,11 @@ class BrokerPool:
     def _reap_idle(self) -> None:
         now = time.monotonic()
         with self._lock:
-            idle = [(key, worker) for key, worker in self._workers.items()
-                    if now - worker.last_activity >= self.idle_seconds
-                    and worker.source.qsize() == 0]
+            idle = [
+                (key, worker)
+                for key, worker in self._workers.items()
+                if now - worker.last_activity >= self.idle_seconds and worker.source.qsize() == 0
+            ]
             for key, _ in idle:
                 self._workers.pop(key, None)
         for _, worker in idle:

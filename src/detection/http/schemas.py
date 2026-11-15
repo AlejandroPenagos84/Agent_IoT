@@ -10,10 +10,12 @@ from pydantic import BaseModel, Field
 class ReportRequest(BaseModel):
     """Optional parameters for one report generation request."""
 
-    now: Annotated[str | None, Field(description="UTC ISO-8601 reference time")] = None
+    now: Annotated[str | None, Field(description='UTC ISO-8601 reference time')] = None
     model: Annotated[str | None, Field(min_length=1)] = None
-    broker_id: Annotated[str | None, Field(
-        min_length=1, description="Limit the report to one of the caller's brokers")] = None
+    broker_id: Annotated[
+        str | None,
+        Field(min_length=1, description="Limit the report to one of the caller's brokers"),
+    ] = None
 
 
 class ReportResponse(BaseModel):
@@ -37,8 +39,9 @@ class BrokerResponse(BaseModel):
     host: str | None
     port: int | None
     created_at: str
-    status: Annotated[str, Field(
-        description="pending (sin captura), connected u offline")] = 'pending'
+    status: Annotated[str, Field(description='pending (sin captura), connected u offline')] = (
+        'pending'
+    )
     sensor_id: str | None = None
     last_seen: str | None = None
 

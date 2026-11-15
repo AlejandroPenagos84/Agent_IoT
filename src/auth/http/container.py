@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import sys
 from dataclasses import dataclass
 
 import redis
@@ -14,6 +15,7 @@ from auth.application.ports.refresh_store import RefreshTokenStore
 from auth.application.ports.token_service import TokenService
 from auth.application.ports.user_repository import UserRepository
 from auth.application.ports.verification_code_store import VerificationCodeStore
+from auth.application.use_cases.authenticate import Authenticate
 from auth.application.use_cases.login import LoginUseCase
 from auth.application.use_cases.logout import Logout
 from auth.application.use_cases.refresh_session import RefreshSession
@@ -21,15 +23,16 @@ from auth.application.use_cases.register import RegisterUser
 from auth.application.use_cases.resend_verification import ResendVerification
 from auth.application.use_cases.send_verification_code import SendVerificationCode
 from auth.application.use_cases.verify_email import VerifyEmail
+from auth.infrastructure.MailSenderConsole import MailSenderConsole
 from auth.infrastructure.MailSenderSMTP import MailSenderSMTP
 from auth.infrastructure.PasswordHasherArgon2 import PasswordHasherArgon2
 from auth.infrastructure.PyJwtTokenService import PyJwtTokenService
 from auth.infrastructure.repositories.RefreshTokenStoreSQLite import RefreshTokenStoreSQLite
+from auth.infrastructure.repositories.sqlite_schema import connect
 from auth.infrastructure.repositories.UserRepositorySqlite import UserRepositorySQLite
 from auth.infrastructure.repositories.VerificationCodeStoreRedis import (
     RedisVerificationCodeStore,
 )
-from auth.infrastructure.repositories.sqlite_schema import connect
 
 
 def _env_int(name: str, default: int) -> int:
@@ -41,7 +44,27 @@ def _env_bool(name: str, default: bool) -> bool:
     value = os.getenv(name)
     if value is None:
         return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+    return value.strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _mail_sender() -> MailSender:
+    host = os.getenv('AUTH_SMTP_HOST')
+    if not host:
+        print(
+            '[auth] AUTH_SMTP_HOST vacío: los correos se escriben en el log (solo desarrollo)',
+            file=sys.stderr,
+            flush=True,
+        )
+        return MailSenderConsole()
+    return MailSenderSMTP(
+        host,
+        _env_int('AUTH_SMTP_PORT', 587),
+        os.getenv('AUTH_SMTP_USERNAME', ''),
+        os.getenv('AUTH_SMTP_PASSWORD', ''),
+        use_tls=_env_bool('AUTH_SMTP_TLS', True),
+        use_auth=_env_bool('AUTH_SMTP_AUTH', True),
+        from_address=os.getenv('AUTH_SMTP_FROM') or None,
+    )
 
 
 @dataclass
@@ -59,6 +82,7 @@ class AuthContainer:
     login: LoginUseCase
     refresh: RefreshSession
     logout: Logout
+    authenticate: Authenticate
     access_ttl_minutes: int
     refresh_ttl_minutes: int
     cookie_name: str
@@ -76,34 +100,26 @@ def build_container(
     mail: MailSender | None = None,
     hasher: PasswordHasher | None = None,
 ) -> AuthContainer:
-    secret = os.getenv("AUTH_JWT_SECRET")
+    secret = os.getenv('AUTH_JWT_SECRET')
     if not secret:
-        raise ValueError("AUTH_JWT_SECRET is required")
+        raise ValueError('AUTH_JWT_SECRET is required')
 
-    access_ttl_minutes = _env_int("AUTH_ACCESS_TTL_MINUTES", 15)
-    refresh_ttl_minutes = _env_int("AUTH_REFRESH_TTL_MINUTES", 10080)
+    access_ttl_minutes = _env_int('AUTH_ACCESS_TTL_MINUTES', 15)
+    refresh_ttl_minutes = _env_int('AUTH_REFRESH_TTL_MINUTES', 10080)
 
-    connection = connect(os.getenv("AUTH_DB_PATH", "/data/auth.db"))
+    connection = connect(os.getenv('AUTH_DB_PATH', '/data/auth.db'))
     users = UserRepositorySQLite(connection)
     hasher = hasher or PasswordHasherArgon2()
     codes = codes or RedisVerificationCodeStore(
         redis.Redis(
-            host=os.getenv("AUTH_REDIS_HOST", "redis"),
-            port=_env_int("AUTH_REDIS_PORT", 6379),
-            db=_env_int("AUTH_REDIS_DB", 0),
-            password=os.getenv("AUTH_REDIS_PASSWORD") or None,
+            host=os.getenv('AUTH_REDIS_HOST', 'redis'),
+            port=_env_int('AUTH_REDIS_PORT', 6379),
+            db=_env_int('AUTH_REDIS_DB', 0),
+            password=os.getenv('AUTH_REDIS_PASSWORD') or None,
             decode_responses=True,
         )
     )
-    mail = mail or MailSenderSMTP(
-        os.getenv("AUTH_SMTP_HOST", "localhost"),
-        _env_int("AUTH_SMTP_PORT", 587),
-        os.getenv("AUTH_SMTP_USERNAME", ""),
-        os.getenv("AUTH_SMTP_PASSWORD", ""),
-        use_tls=_env_bool("AUTH_SMTP_TLS", True),
-        use_auth=_env_bool("AUTH_SMTP_AUTH", True),
-        from_address=os.getenv("AUTH_SMTP_FROM") or None,
-    )
+    mail = mail or _mail_sender()
     tokens = PyJwtTokenService(secret, access_ttl_minutes, refresh_ttl_minutes)
     refresh_store = RefreshTokenStoreSQLite(connection)
     send_code = SendVerificationCode(codes, hasher, mail)
@@ -122,10 +138,11 @@ def build_container(
         login=LoginUseCase(users, hasher, tokens, refresh_store),
         refresh=RefreshSession(tokens, users, refresh_store),
         logout=Logout(tokens, refresh_store),
+        authenticate=Authenticate(tokens, users),
         access_ttl_minutes=access_ttl_minutes,
         refresh_ttl_minutes=refresh_ttl_minutes,
-        cookie_name=os.getenv("AUTH_COOKIE_NAME", "auth_refresh"),
-        cookie_secure=_env_bool("AUTH_COOKIE_SECURE", True),
-        cookie_samesite=os.getenv("AUTH_COOKIE_SAMESITE", "lax"),
-        cookie_path=os.getenv("AUTH_COOKIE_PATH", "/api/v1/auth"),
+        cookie_name=os.getenv('AUTH_COOKIE_NAME', 'auth_refresh'),
+        cookie_secure=_env_bool('AUTH_COOKIE_SECURE', True),
+        cookie_samesite=os.getenv('AUTH_COOKIE_SAMESITE', 'lax'),
+        cookie_path=os.getenv('AUTH_COOKIE_PATH', '/api/v1/auth'),
     )

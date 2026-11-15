@@ -1,0 +1,29 @@
+# Configuración de herramientas. El proyecto no se empaqueta; las dependencias
+# siguen en requirements.txt y requirements-dev.txt.
+
+[tool.ruff]
+target-version = "py311"   # versión de las imágenes Docker
+line-length = 100
+src = ["src", "tests"]
+extend-exclude = ["ML_Model"]   # notebooks de entrenamiento, se dejan como están
+
+[tool.ruff.format]
+quote-style = "single"     # la convención que ya usa el código
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "W",    # pycodestyle (warnings)
+    "F",    # pyflakes: imports y variables sin usar, nombres indefinidos
+    "I",    # orden de imports (isort)
+    "B",    # flake8-bugbear: errores comunes
+    "UP",   # sintaxis moderna para py311
+]
+ignore = [
+    "E501",   # largo de línea: lo resuelve el formateador
+    "UP042",  # StrEnum cambia str() de los enums existentes
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "auth", "capture", "detection", "simulation", "wire"]

@@ -11,13 +11,13 @@ import time
 import unittest
 from pathlib import Path
 
+from capture.infrastructure.transport import SocketSender
 from detection.application import Agent, BrokerPool, DetectionServer
 from detection.application.ports.ports_out import AlertSink, Classifier
 from detection.application.ports.types import Frame
 from detection.application.use_cases.broker_pool import QueueFeatureSource
 from detection.domain.model import FrameContext
-from detection.infrastructure.tshark.async_socket_server import AsyncSocketServer
-from detection.infrastructure.tshark.socket_sender import SocketSender
+from detection.infrastructure.transport.async_socket_server import AsyncSocketServer
 
 
 def make_certs(directory):
@@ -28,22 +28,72 @@ def make_certs(directory):
     ca_key, ca_crt = root / 'ca.key', root / 'ca.crt'
     server_key, server_csr = root / 'server.key', root / 'server.csr'
     server_crt, ext = root / 'server.crt', root / 'server.ext'
-    subprocess.run([
-        'openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
-        '-keyout', str(ca_key), '-out', str(ca_crt), '-days', '1',
-        '-subj', '/CN=test-ca',
-        '-addext', 'basicConstraints=critical,CA:TRUE',
-        '-addext', 'keyUsage=critical,keyCertSign,cRLSign',
-        '-addext', 'subjectKeyIdentifier=hash',
-    ], check=True, capture_output=True)
-    subprocess.run(['openssl', 'req', '-newkey', 'rsa:2048', '-nodes',
-                    '-keyout', str(server_key), '-out', str(server_csr),
-                    '-subj', '/CN=localhost'], check=True, capture_output=True)
+    subprocess.run(
+        [
+            'openssl',
+            'req',
+            '-x509',
+            '-newkey',
+            'rsa:2048',
+            '-nodes',
+            '-keyout',
+            str(ca_key),
+            '-out',
+            str(ca_crt),
+            '-days',
+            '1',
+            '-subj',
+            '/CN=test-ca',
+            '-addext',
+            'basicConstraints=critical,CA:TRUE',
+            '-addext',
+            'keyUsage=critical,keyCertSign,cRLSign',
+            '-addext',
+            'subjectKeyIdentifier=hash',
+        ],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [
+            'openssl',
+            'req',
+            '-newkey',
+            'rsa:2048',
+            '-nodes',
+            '-keyout',
+            str(server_key),
+            '-out',
+            str(server_csr),
+            '-subj',
+            '/CN=localhost',
+        ],
+        check=True,
+        capture_output=True,
+    )
     ext.write_text('subjectAltName=DNS:localhost,IP:127.0.0.1\n')
-    subprocess.run(['openssl', 'x509', '-req', '-in', str(server_csr),
-                    '-CA', str(ca_crt), '-CAkey', str(ca_key),
-                    '-CAcreateserial', '-out', str(server_crt), '-days', '1',
-                    '-extfile', str(ext)], check=True, capture_output=True)
+    subprocess.run(
+        [
+            'openssl',
+            'x509',
+            '-req',
+            '-in',
+            str(server_csr),
+            '-CA',
+            str(ca_crt),
+            '-CAkey',
+            str(ca_key),
+            '-CAcreateserial',
+            '-out',
+            str(server_crt),
+            '-days',
+            '1',
+            '-extfile',
+            str(ext),
+        ],
+        check=True,
+        capture_output=True,
+    )
     return ca_crt, server_crt, server_key
 
 
@@ -51,7 +101,6 @@ def tls_validator(token):
     if token != 'good':
         raise ValueError('token inválido')
     return {'tenant_id': 't1', 'broker_id': 'b1', 'sensor_id': 's1'}
-
 
 
 def feature_record(index, stream=1, tenant='t1', broker='b1', sensor='s1'):
@@ -123,8 +172,7 @@ def make_pool(**kwargs):
     alerts = AlertRecorder()
 
     def factory(source):
-        return Agent(source, AlwaysAttack(), alerts, window_size=1,
-                     alert_cooldown=0)
+        return Agent(source, AlwaysAttack(), alerts, window_size=1, alert_cooldown=0)
 
     return BrokerPool(factory, **kwargs), alerts
 
@@ -145,8 +193,9 @@ def connect(path):
 
 class SocketSenderTests(unittest.TestCase):
     def test_queue_is_bounded_and_counts_drops(self):
-        sender = SocketSender('/tmp/does-not-exist.sock', queue_size=10,
-                              retry_seconds=0.01, stats_seconds=999)
+        sender = SocketSender.from_endpoint(
+            '/tmp/does-not-exist.sock', queue_size=10, retry_seconds=0.01, stats_seconds=999
+        )
         for index in range(100):
             sender.send(json.dumps(feature_record(index)) + '\n')
         self.assertEqual(len(sender._queue), 10)
@@ -156,23 +205,24 @@ class SocketSenderTests(unittest.TestCase):
         collector = Collector(target=5)
         with tempfile.TemporaryDirectory(prefix='iot-sock-') as directory:
             server, path = start_server(directory, collector)
-            sender = SocketSender(path, retry_seconds=0.01)
+            sender = SocketSender.from_endpoint(path, retry_seconds=0.01)
             sender.start()
             for index in range(5):
                 sender.send(json.dumps(feature_record(index)) + '\n')
             self.assertTrue(collector.done.wait(5))
             sender.close(0.5)
             server.stop()
-        self.assertEqual([frame.features['tcp_frames_5s']
-                          for frame in collector.snapshot()],
-                         [0.0, 1.0, 2.0, 3.0, 4.0])
+        self.assertEqual(
+            [frame.features['tcp_frames_5s'] for frame in collector.snapshot()],
+            [0.0, 1.0, 2.0, 3.0, 4.0],
+        )
         self.assertEqual(collector.snapshot()[0].context.sensor_id, 's1')
 
     def test_sender_connects_when_server_appears_later(self):
         collector = Collector(target=1)
         with tempfile.TemporaryDirectory(prefix='iot-late-') as directory:
             path = str(Path(directory) / 'features.sock')
-            sender = SocketSender(path, retry_seconds=0.01)
+            sender = SocketSender.from_endpoint(path, retry_seconds=0.01)
             sender.start()
             sender.send(json.dumps(feature_record(0)) + '\n')
             time.sleep(0.1)
@@ -186,7 +236,7 @@ class SocketSenderTests(unittest.TestCase):
         collector = Collector(target=3)
         with tempfile.TemporaryDirectory(prefix='iot-drain-') as directory:
             server, path = start_server(directory, collector)
-            sender = SocketSender(path, retry_seconds=0.01)
+            sender = SocketSender.from_endpoint(path, retry_seconds=0.01)
             sender.start()
             for index in range(3):
                 sender.send(json.dumps(feature_record(index)) + '\n')
@@ -243,8 +293,7 @@ class TlsSocketTests(unittest.TestCase):
         ca, cert, key = make_certs(directory)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(str(cert), str(key))
-        server = AsyncSocketServer('tls://127.0.0.1:0', ssl_context=context,
-                                   **kwargs)
+        server = AsyncSocketServer('tls://127.0.0.1:0', ssl_context=context, **kwargs)
         server.start(collector.route)
         return server, ca
 
@@ -252,14 +301,17 @@ class TlsSocketTests(unittest.TestCase):
         collector = Collector(target=1)
         with tempfile.TemporaryDirectory(prefix='iot-tls-') as directory:
             server, ca = self._start_tls_server(
-                directory, collector, token_validator=tls_validator,
-                require_token=True)
+                directory, collector, token_validator=tls_validator, require_token=True
+            )
             try:
                 client = ssl.create_default_context(cafile=str(ca))
-                sender = SocketSender(
-                    f'tls://127.0.0.1:{server.port}', tls_context=client,
-                    server_name='localhost', sensor_token='good',
-                    retry_seconds=0.05)
+                sender = SocketSender.from_endpoint(
+                    f'tls://127.0.0.1:{server.port}',
+                    tls_context=client,
+                    server_name='localhost',
+                    sensor_token='good',
+                    retry_seconds=0.05,
+                )
                 sender.start()
                 record = feature_record(0)
                 for key in ('tenant_id', 'broker_id', 'sensor_id'):
@@ -278,14 +330,17 @@ class TlsSocketTests(unittest.TestCase):
         collector = Collector()
         with tempfile.TemporaryDirectory(prefix='iot-tls-bad-') as directory:
             server, ca = self._start_tls_server(
-                directory, collector, token_validator=tls_validator,
-                require_token=True)
+                directory, collector, token_validator=tls_validator, require_token=True
+            )
             try:
                 client = ssl.create_default_context(cafile=str(ca))
-                sender = SocketSender(
-                    f'tls://127.0.0.1:{server.port}', tls_context=client,
-                    server_name='localhost', sensor_token='bad',
-                    retry_seconds=0.05)
+                sender = SocketSender.from_endpoint(
+                    f'tls://127.0.0.1:{server.port}',
+                    tls_context=client,
+                    server_name='localhost',
+                    sensor_token='bad',
+                    retry_seconds=0.05,
+                )
                 sender.start()
                 sender.send(json.dumps(feature_record(0)) + '\n')
                 time.sleep(0.5)
@@ -298,14 +353,17 @@ class TlsSocketTests(unittest.TestCase):
         collector = Collector()
         with tempfile.TemporaryDirectory(prefix='iot-tls-spoof-') as directory:
             server, ca = self._start_tls_server(
-                directory, collector, token_validator=tls_validator,
-                require_token=True)
+                directory, collector, token_validator=tls_validator, require_token=True
+            )
             try:
                 client = ssl.create_default_context(cafile=str(ca))
-                sender = SocketSender(
-                    f'tls://127.0.0.1:{server.port}', tls_context=client,
-                    server_name='localhost', sensor_token='good',
-                    retry_seconds=0.05)
+                sender = SocketSender.from_endpoint(
+                    f'tls://127.0.0.1:{server.port}',
+                    tls_context=client,
+                    server_name='localhost',
+                    sensor_token='good',
+                    retry_seconds=0.05,
+                )
                 sender.start()
                 sender.send(json.dumps(feature_record(0, broker='b2')) + '\n')
                 time.sleep(0.5)
@@ -314,7 +372,6 @@ class TlsSocketTests(unittest.TestCase):
             finally:
                 server.stop()
 
-
     def test_renewed_token_reconnects_and_expired_token_disconnects(self):
         collector = Collector(target=2)
         hellos = []
@@ -322,20 +379,22 @@ class TlsSocketTests(unittest.TestCase):
         def validator(token):
             hellos.append(token)
             exp = time.time() + (0.6 if token == 'short' else 60)
-            return {'tenant_id': 't1', 'broker_id': 'b1', 'sensor_id': 's1',
-                    'exp': exp}
+            return {'tenant_id': 't1', 'broker_id': 'b1', 'sensor_id': 's1', 'exp': exp}
 
         current = {'token': 'short'}
         with tempfile.TemporaryDirectory(prefix='iot-tls-renew-') as directory:
             server, ca = self._start_tls_server(
-                directory, collector, token_validator=validator,
-                require_token=True)
+                directory, collector, token_validator=validator, require_token=True
+            )
             try:
                 client = ssl.create_default_context(cafile=str(ca))
-                sender = SocketSender(
-                    f'tls://127.0.0.1:{server.port}', tls_context=client,
-                    server_name='localhost', retry_seconds=0.05,
-                    token_provider=lambda: current['token'])
+                sender = SocketSender.from_endpoint(
+                    f'tls://127.0.0.1:{server.port}',
+                    tls_context=client,
+                    server_name='localhost',
+                    retry_seconds=0.05,
+                    token_provider=lambda: current['token'],
+                )
                 sender.start()
                 sender.send(json.dumps(feature_record(0)) + '\n')
                 self.assertTrue(wait_for(lambda: len(collector.snapshot()) == 1))
@@ -357,13 +416,17 @@ class TlsSocketTests(unittest.TestCase):
         collector = Collector()
 
         def validator(token):
-            return {'tenant_id': 't1', 'broker_id': 'b1', 'sensor_id': 's1',
-                    'exp': time.time() + 0.3}
+            return {
+                'tenant_id': 't1',
+                'broker_id': 'b1',
+                'sensor_id': 's1',
+                'exp': time.time() + 0.3,
+            }
 
         with tempfile.TemporaryDirectory(prefix='iot-tls-exp-') as directory:
             server, ca = self._start_tls_server(
-                directory, collector, token_validator=validator,
-                require_token=True)
+                directory, collector, token_validator=validator, require_token=True
+            )
             try:
                 client = ssl.create_default_context(cafile=str(ca))
                 raw = socket.create_connection(('127.0.0.1', server.port), 5)
@@ -383,40 +446,96 @@ class BrokerPoolTests(unittest.TestCase):
     def test_one_worker_per_broker(self):
         pool, alerts = make_pool(max_workers=4, queue_size=10)
         now = time.time()
-        asyncio.run(pool.route(Frame({}, FrameContext(
-            ts=now, ip='10.0.0.1', dst_ip='10.0.0.2', srcport=1,
-            dstport=1883, stream_id=1, tenant_id='t', broker_id='b1',
-            sensor_id='s1'))))
-        asyncio.run(pool.route(Frame({}, FrameContext(
-            ts=now, ip='10.0.0.1', dst_ip='10.0.0.2', srcport=2,
-            dstport=1883, stream_id=1, tenant_id='t', broker_id='b2',
-            sensor_id='s1'))))
+        asyncio.run(
+            pool.route(
+                Frame(
+                    {},
+                    FrameContext(
+                        ts=now,
+                        ip='10.0.0.1',
+                        dst_ip='10.0.0.2',
+                        srcport=1,
+                        dstport=1883,
+                        stream_id=1,
+                        tenant_id='t',
+                        broker_id='b1',
+                        sensor_id='s1',
+                    ),
+                )
+            )
+        )
+        asyncio.run(
+            pool.route(
+                Frame(
+                    {},
+                    FrameContext(
+                        ts=now,
+                        ip='10.0.0.1',
+                        dst_ip='10.0.0.2',
+                        srcport=2,
+                        dstport=1883,
+                        stream_id=1,
+                        tenant_id='t',
+                        broker_id='b2',
+                        sensor_id='s1',
+                    ),
+                )
+            )
+        )
         self.assertTrue(wait_for(lambda: len(alerts.snapshot()) == 2))
         self.assertEqual(len(pool), 2)
         pool.stop()
-        self.assertEqual({alert.broker_id for alert in alerts.snapshot()},
-                         {'b1', 'b2'})
+        self.assertEqual({alert.broker_id for alert in alerts.snapshot()}, {'b1', 'b2'})
 
     def test_same_broker_shares_worker(self):
         pool, alerts = make_pool(max_workers=4, queue_size=10)
         now = time.time()
         for port in (1, 2):
-            asyncio.run(pool.route(Frame({}, FrameContext(
-                ts=now, ip='10.0.0.1', dst_ip='10.0.0.2', srcport=port,
-                dstport=1883, stream_id=port, tenant_id='t', broker_id='b1',
-                sensor_id='s1'))))
+            asyncio.run(
+                pool.route(
+                    Frame(
+                        {},
+                        FrameContext(
+                            ts=now,
+                            ip='10.0.0.1',
+                            dst_ip='10.0.0.2',
+                            srcport=port,
+                            dstport=1883,
+                            stream_id=port,
+                            tenant_id='t',
+                            broker_id='b1',
+                            sensor_id='s1',
+                        ),
+                    )
+                )
+            )
         self.assertTrue(wait_for(lambda: len(alerts.snapshot()) == 2))
         self.assertEqual(len(pool), 1)
         pool.stop()
 
     def test_idle_workers_are_evicted(self):
-        pool, alerts = make_pool(max_workers=4, queue_size=10,
-                                 idle_seconds=0.05, reap_interval=0.02)
+        pool, alerts = make_pool(
+            max_workers=4, queue_size=10, idle_seconds=0.05, reap_interval=0.02
+        )
         pool.start()
-        asyncio.run(pool.route(Frame({}, FrameContext(
-            ts=time.time(), ip='10.0.0.1', dst_ip='10.0.0.2', srcport=1,
-            dstport=1883, stream_id=1, tenant_id='t', broker_id='b1',
-            sensor_id='s1'))))
+        asyncio.run(
+            pool.route(
+                Frame(
+                    {},
+                    FrameContext(
+                        ts=time.time(),
+                        ip='10.0.0.1',
+                        dst_ip='10.0.0.2',
+                        srcport=1,
+                        dstport=1883,
+                        stream_id=1,
+                        tenant_id='t',
+                        broker_id='b1',
+                        sensor_id='s1',
+                    ),
+                )
+            )
+        )
         self.assertTrue(wait_for(lambda: len(alerts.snapshot()) == 1))
         self.assertTrue(wait_for(lambda: len(pool) == 0))
         pool.stop()
@@ -446,7 +565,7 @@ class EndToEndTests(unittest.TestCase):
             thread = threading.Thread(target=detection.run, daemon=True)
             thread.start()
             self.assertTrue(wait_for(lambda: os.path.exists(path)))
-            sender = SocketSender(path, retry_seconds=0.01)
+            sender = SocketSender.from_endpoint(path, retry_seconds=0.01)
             sender.start()
             sender.send(json.dumps(feature_record(0, broker='b1')) + '\n')
             sender.send(json.dumps(feature_record(1, broker='b2')) + '\n')
@@ -455,8 +574,7 @@ class EndToEndTests(unittest.TestCase):
             detection.stop()
             thread.join(5)
             self.assertFalse(thread.is_alive())
-        self.assertEqual({alert.broker_id for alert in alerts.snapshot()},
-                         {'b1', 'b2'})
+        self.assertEqual({alert.broker_id for alert in alerts.snapshot()}, {'b1', 'b2'})
 
 
 if __name__ == '__main__':

@@ -7,9 +7,9 @@ import os
 import sys
 import threading
 import uuid
-from datetime import datetime, timezone
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Sequence
 
 from detection.application.ports.ports_out import EvidenceSink
 from detection.domain.model import Alert
@@ -47,19 +47,21 @@ class FileEvidenceSink(EvidenceSink):
             return
         with self._lock:
             if self._total_size() >= self.max_bytes:
-                print('[evidence] tope de evidencia alcanzado; no se guarda '
-                      f'{alert.alert_id}', file=sys.stderr, flush=True)
+                print(
+                    f'[evidence] tope de evidencia alcanzado; no se guarda {alert.alert_id}',
+                    file=sys.stderr,
+                    flush=True,
+                )
                 return
             alert_id = alert.alert_id or str(uuid.uuid4())
-            day = datetime.now(timezone.utc).date().isoformat()
+            day = datetime.now(UTC).date().isoformat()
             folder = self.directory / day
             folder.mkdir(parents=True, exist_ok=True)
             path = folder / f'{alert_id}.jsonl'
             tmp = path.with_name(f'.{path.name}.tmp')
             try:
                 with tmp.open('w', encoding='utf-8') as handle:
-                    handle.write(json.dumps({'alert': alert.to_dict()},
-                                            ensure_ascii=False) + '\n')
+                    handle.write(json.dumps({'alert': alert.to_dict()}, ensure_ascii=False) + '\n')
                     for record in records:
                         handle.write(json.dumps(record, ensure_ascii=False) + '\n')
                 os.replace(tmp, path)

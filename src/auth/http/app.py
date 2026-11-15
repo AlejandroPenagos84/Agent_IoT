@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 from fastapi import FastAPI
 
@@ -22,9 +22,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app(*, container: AuthContainer | None = None) -> FastAPI:
     container = container or build_container()
-    app = FastAPI(title="Auth API", version="1.0.0", lifespan=_lifespan)
+    app = FastAPI(title='Auth API', version='1.0.0', lifespan=_lifespan)
     app.state.container = container
     register_exception_handlers(app)
     app.include_router(health.router)
-    app.include_router(auth.router, prefix="/api/v1")
+    app.include_router(auth.router, prefix='/api/v1')
     return app

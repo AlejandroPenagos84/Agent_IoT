@@ -12,13 +12,13 @@ class RedisVerificationCodeStore:
         self._r = client
 
     def _code_key(self, email: str) -> str:
-        return f"verify:{email}"
+        return f'verify:{email}'
 
     def _fail_key(self, email: str) -> str:
-        return f"verify_fail:{email}"
+        return f'verify_fail:{email}'
 
     def _cooldown_key(self, email: str) -> str:
-        return f"verify_cooldown:{email}"
+        return f'verify_cooldown:{email}'
 
     def save(self, email: str, code_hash: str, ttl_seconds: int) -> None:
         with redis_errors():

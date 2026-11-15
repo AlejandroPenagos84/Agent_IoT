@@ -6,15 +6,25 @@ import json
 import math
 import re
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 REQUIRED_FIELDS = ('ts', 'kind', 'label')
 OPTIONAL_FIELDS = (
-    'alert_id', 'run_id', 'tenant_id', 'broker_id', 'sensor_id',
-    'client_id', 'ip', 'topic', 'mse', 'source')
+    'alert_id',
+    'run_id',
+    'tenant_id',
+    'broker_id',
+    'sensor_id',
+    'client_id',
+    'ip',
+    'topic',
+    'mse',
+    'source',
+)
 KNOWN_KINDS = frozenset({'class'})
 KNOWN_SOURCES = frozenset({'tshark', 'tshark-tcp', 'mqtt', 'classifier', 'agente'})
 _SPACE_RE = re.compile(r'\s+')
@@ -53,7 +63,7 @@ def _timestamp(value: Any) -> tuple[Any, str]:
     if isinstance(value, (int, float)):
         if not math.isfinite(float(value)):
             raise ValueError('ts must be finite')
-        instant = datetime.fromtimestamp(float(value), timezone.utc)
+        instant = datetime.fromtimestamp(float(value), UTC)
         return value, instant.isoformat(timespec='microseconds').replace('+00:00', 'Z')
     if isinstance(value, str):
         original = value
@@ -66,8 +76,9 @@ def _timestamp(value: Any) -> tuple[Any, str]:
             raise ValueError('ts is not a valid ISO-8601 timestamp') from exc
         if instant.tzinfo is None:
             raise ValueError('ts ISO-8601 value must include a timezone')
-        return original, instant.astimezone(timezone.utc).isoformat(
-            timespec='microseconds').replace('+00:00', 'Z')
+        return original, instant.astimezone(UTC).isoformat(timespec='microseconds').replace(
+            '+00:00', 'Z'
+        )
     raise ValueError('ts must be an epoch number or ISO-8601 string')
 
 
@@ -103,10 +114,27 @@ def _mse(value: Any) -> float | None:
 
 def _stable_alert_id(record: dict[str, Any]) -> str:
     canonical = json.dumps(
-        {key: record.get(key) for key in (
-            'ts_utc', 'kind', 'label', 'tenant_id', 'broker_id', 'sensor_id',
-            'client_id', 'ip', 'topic', 'mse', 'source', 'run_id')},
-        sort_keys=True, separators=(',', ':'), ensure_ascii=False)
+        {
+            key: record.get(key)
+            for key in (
+                'ts_utc',
+                'kind',
+                'label',
+                'tenant_id',
+                'broker_id',
+                'sensor_id',
+                'client_id',
+                'ip',
+                'topic',
+                'mse',
+                'source',
+                'run_id',
+            )
+        },
+        sort_keys=True,
+        separators=(',', ':'),
+        ensure_ascii=False,
+    )
     return f'generated:{hashlib.sha256(canonical.encode()).hexdigest()}'
 
 
@@ -133,8 +161,9 @@ class AlertProcessingPipeline:
             return sorted(self.input_path.glob('*.jsonl'))
         raise FileNotFoundError(f'Input path does not exist: {self.input_path}')
 
-    def _normalize(self, raw: dict[str, Any], source_file: str,
-                   source_line: int, report: ProcessingReport) -> dict[str, Any]:
+    def _normalize(
+        self, raw: dict[str, Any], source_file: str, source_line: int, report: ProcessingReport
+    ) -> dict[str, Any]:
         for field_name in REQUIRED_FIELDS:
             if field_name not in raw:
                 report.missing_fields[field_name] += 1
@@ -185,8 +214,10 @@ class AlertProcessingPipeline:
         duplicates_path = self.output_dir / 'duplicates.jsonl'
         records: list[dict[str, Any]] = []
         seen: dict[str, dict[str, Any]] = {}
-        with errors_path.open('w', encoding='utf-8') as errors, \
-                duplicates_path.open('w', encoding='utf-8') as duplicates:
+        with (
+            errors_path.open('w', encoding='utf-8') as errors,
+            duplicates_path.open('w', encoding='utf-8') as duplicates,
+        ):
             for path in self._files():
                 with path.open('r', encoding='utf-8', errors='replace') as handle:
                     for line_number, line in enumerate(handle, 1):
@@ -197,29 +228,41 @@ class AlertProcessingPipeline:
                             raw = json.loads(line)
                             if not isinstance(raw, dict):
                                 raise ValueError('JSON record must be an object')
-                            record = self._normalize(
-                                raw, str(path), line_number, report)
+                            record = self._normalize(raw, str(path), line_number, report)
                         except (json.JSONDecodeError, ValueError, OverflowError) as exc:
                             report.invalid_records += 1
-                            errors.write(json.dumps({
-                                'source_file': str(path),
-                                'source_line': line_number,
-                                'error_type': 'invalid_json' if isinstance(
-                                    exc, json.JSONDecodeError) else 'invalid_record',
-                                'message': str(exc),
-                                'raw_line': line.rstrip('\n'),
-                            }, ensure_ascii=False) + '\n')
+                            errors.write(
+                                json.dumps(
+                                    {
+                                        'source_file': str(path),
+                                        'source_line': line_number,
+                                        'error_type': 'invalid_json'
+                                        if isinstance(exc, json.JSONDecodeError)
+                                        else 'invalid_record',
+                                        'message': str(exc),
+                                        'raw_line': line.rstrip('\n'),
+                                    },
+                                    ensure_ascii=False,
+                                )
+                                + '\n'
+                            )
                             continue
                         previous = seen.get(record['alert_id'])
                         if previous is not None:
                             report.duplicate_records += 1
-                            duplicates.write(json.dumps({
-                                'alert_id': record['alert_id'],
-                                'source_file': str(path),
-                                'source_line': line_number,
-                                'duplicate_of': previous,
-                                'reason': 'same_alert_id',
-                            }, ensure_ascii=False) + '\n')
+                            duplicates.write(
+                                json.dumps(
+                                    {
+                                        'alert_id': record['alert_id'],
+                                        'source_file': str(path),
+                                        'source_line': line_number,
+                                        'duplicate_of': previous,
+                                        'reason': 'same_alert_id',
+                                    },
+                                    ensure_ascii=False,
+                                )
+                                + '\n'
+                            )
                             continue
                         seen[record['alert_id']] = {
                             'source_file': record['source_file'],
@@ -230,8 +273,8 @@ class AlertProcessingPipeline:
 
         self._write_parquet(records)
         (self.output_dir / 'processing_report.json').write_text(
-            json.dumps(report.to_dict(), indent=2, ensure_ascii=False) + '\n',
-            encoding='utf-8')
+            json.dumps(report.to_dict(), indent=2, ensure_ascii=False) + '\n', encoding='utf-8'
+        )
         return report
 
     def _write_parquet(self, records: list[dict[str, Any]]) -> None:
@@ -240,11 +283,13 @@ class AlertProcessingPipeline:
         except ImportError as exc:
             raise RuntimeError(
                 'Parquet output requires pandas and pyarrow. '
-                'Install dependencies from requirements.txt.') from exc
+                'Install dependencies from requirements.txt.'
+            ) from exc
         try:
             pd.DataFrame(records).to_parquet(
-                self.output_dir / 'alerts.parquet', index=False, engine='pyarrow')
+                self.output_dir / 'alerts.parquet', index=False, engine='pyarrow'
+            )
         except (ImportError, ValueError) as exc:
             raise RuntimeError(
-                'Parquet output requires pyarrow. Install dependencies from '
-                'requirements.txt.') from exc
+                'Parquet output requires pyarrow. Install dependencies from requirements.txt.'
+            ) from exc

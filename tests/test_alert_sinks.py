@@ -27,10 +27,8 @@ class AlertSinkTests(unittest.TestCase):
 
             files = sorted(Path(directory).glob('*.jsonl'))
             self.assertEqual(len(files), 2)
-            records = [json.loads(path.read_text(encoding='utf-8').strip())
-                       for path in files]
-            self.assertEqual({record['label'] for record in records},
-                             {'dos', 'intrusion'})
+            records = [json.loads(path.read_text(encoding='utf-8').strip()) for path in files]
+            self.assertEqual({record['label'] for record in records}, {'dos', 'intrusion'})
 
     def test_composite_delivers_to_mqtt_and_file_sinks(self):
         mqtt = RecordingSink()

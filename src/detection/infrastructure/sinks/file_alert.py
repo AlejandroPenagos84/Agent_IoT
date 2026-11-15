@@ -6,8 +6,10 @@ import os
 from detection.application.ports.ports_out import AlertSink
 from detection.domain.model import Alert
 
+
 class FileAlertSink(AlertSink):
     """Append each alert as one JSON object per line."""
+
     def __init__(self, path: str, flush: bool = True):
         """Configure the output path and whether each write is flushed."""
         self.path = path

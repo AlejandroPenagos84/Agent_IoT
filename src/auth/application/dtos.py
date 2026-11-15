@@ -15,7 +15,7 @@ class RegisterResult:
     created_at: datetime
 
     @classmethod
-    def from_user(cls, user: User) -> "RegisterResult":
+    def from_user(cls, user: User) -> 'RegisterResult':
         return cls(
             id=user.id,
             username=user.username,

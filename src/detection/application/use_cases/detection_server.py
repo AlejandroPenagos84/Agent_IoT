@@ -15,10 +15,14 @@ class DetectionServer:
         self._stop = threading.Event()
         self._stopped = False
 
+    def start(self) -> None:
+        """Start the pool and the transport without blocking (app lifespan)."""
+        self.pool.start()
+        self.server.start(self.pool.route)
+
     def run(self) -> None:
         try:
-            self.pool.start()
-            self.server.start(self.pool.route)
+            self.start()
             while not self._stop.wait(1.0):
                 pass
         except KeyboardInterrupt:

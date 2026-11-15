@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncIterator
 
 from fastapi import FastAPI
 
@@ -32,8 +32,7 @@ def create_app(
     timeout: float | None = None,
 ) -> FastAPI:
     """Create the detection API using environment-backed production defaults."""
-    app = FastAPI(title="IoT Detection API", version="1.0.0",
-                  lifespan=_lifespan)
+    app = FastAPI(title='IoT Detection API', version='1.0.0', lifespan=_lifespan)
     app.state.settings = settings or ApiSettings.from_env(
         summaries_dir=summaries_dir,
         report_path=report_path,
@@ -43,9 +42,9 @@ def create_app(
     )
     app.state.registry = container or build_container()
     app.include_router(health.router)
-    app.include_router(reports.router, prefix="/api/v1")
-    app.include_router(brokers.router, prefix="/api/v1")
-    app.include_router(sensors.broker_router, prefix="/api/v1")
-    app.include_router(sensors.token_router, prefix="/api/v1")
-    app.include_router(alerts.router, prefix="/api/v1")
+    app.include_router(reports.router, prefix='/api/v1')
+    app.include_router(brokers.router, prefix='/api/v1')
+    app.include_router(sensors.broker_router, prefix='/api/v1')
+    app.include_router(sensors.token_router, prefix='/api/v1')
+    app.include_router(alerts.router, prefix='/api/v1')
     return app

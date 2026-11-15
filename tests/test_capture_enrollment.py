@@ -8,19 +8,17 @@ from pathlib import Path
 try:
     import uvicorn
 
+    from _identity import JwtOnlyIdentity
     from auth.infrastructure.PyJwtTokenService import PyJwtTokenService
     from detection.http import ApiSettings, build_container, create_app
     from detection.http.onboarding import OnboardingConfig
-    from detection.infrastructure.sensor_tokens import (RenewingAgentToken,
-                                                        decode_alert_token)
+    from detection.infrastructure.sensor_tokens import SensorTokenService
 except ImportError as exc:  # API dependencies missing
-    raise unittest.SkipTest(f'API test dependencies missing: {exc}')
+    raise unittest.SkipTest(f'API test dependencies missing: {exc}') from exc
 
-from detection.infrastructure.tshark.enrollment import (ApiClient,
-                                                         EnrollmentError,
-                                                         SensorCredentials)
-from detection.infrastructure.tshark.stream_features import (apply_enrollment,
-                                                              parse_args)
+from capture.cli import parse_args
+from capture.composition_root import apply_enrollment
+from capture.infrastructure.enrollment import ApiClient, EnrollmentError, SensorCredentials
 
 SECRET = 'test-secret-with-enough-length-0123456789'
 
@@ -47,16 +45,24 @@ class CaptureEnrollmentTests(unittest.TestCase):
         ca = root / 'ca.crt'
         ca.write_text('PEM-CA\n', encoding='utf-8')
         cls.container = build_container(
-            db_path=str(root / 'detection.db'), jwt_secret=SECRET,
-            alerts_dir=root / 'alerts', sensor_ttl_minutes=60,
+            db_path=str(root / 'detection.db'),
+            jwt_secret=SECRET,
+            identity=JwtOnlyIdentity(SECRET),
+            alerts_dir=root / 'alerts',
+            sensor_ttl_minutes=60,
             onboarding=OnboardingConfig(
                 agent_endpoint='tls://agent.example.com:8443',
-                agent_server_name='agent.example.com', agent_ca_path=ca))
-        app = create_app(ApiSettings(root / 'r.json', 'http://o', 'm', 1.0, 'UTC'),
-                         container=cls.container)
+                agent_server_name='agent.example.com',
+                agent_ca_path=ca,
+            ),
+        )
+        app = create_app(
+            ApiSettings(root / 'r.json', 'http://o', 'm', 1.0, 'UTC'), container=cls.container
+        )
         port = _free_port()
-        cls.server = uvicorn.Server(uvicorn.Config(
-            app, host='127.0.0.1', port=port, log_level='error'))
+        cls.server = uvicorn.Server(
+            uvicorn.Config(app, host='127.0.0.1', port=port, log_level='error')
+        )
         cls.thread = threading.Thread(target=cls.server.run, daemon=True)
         cls.thread.start()
         deadline = time.time() + 10
@@ -84,17 +90,24 @@ class CaptureEnrollmentTests(unittest.TestCase):
     def _user_post(self, path, body=None):
         import json
         import urllib.request
+
         request = urllib.request.Request(
-            self.url + path, method='POST',
+            self.url + path,
+            method='POST',
             data=json.dumps(body or {}).encode(),
-            headers={**self.user, 'Content-Type': 'application/json'})
+            headers={**self.user, 'Content-Type': 'application/json'},
+        )
         with urllib.request.urlopen(request) as response:
             return json.loads(response.read())
 
     def _credentials(self, key=None, clock=None):
-        return SensorCredentials(ApiClient(self.url), self.state.name,
-                                 key or self.key, name='host-1',
-                                 clock=clock or time.time)
+        return SensorCredentials(
+            ApiClient(self.url),
+            self.state.name,
+            key or self.key,
+            name='host-1',
+            clock=clock or time.time,
+        )
 
     def test_enroll_persists_state_and_fills_capture_args(self):
         credentials = self._credentials()
@@ -118,8 +131,7 @@ class CaptureEnrollmentTests(unittest.TestCase):
         second = self._credentials().ensure(retry=False)
         self.assertEqual(first.sensor_id, second.sensor_id)
         self.assertEqual(first.sensor_secret, second.sensor_secret)
-        self.assertEqual(len(self.container.store.list_sensors(
-            'user-1', self.broker_id)), 1)
+        self.assertEqual(len(self.container.store.list_sensors('user-1', self.broker_id)), 1)
 
     def test_token_is_renewed_after_half_lifetime(self):
         clock = Clock()
@@ -129,17 +141,16 @@ class CaptureEnrollmentTests(unittest.TestCase):
         credentials.refresh()
         self.assertEqual(credentials.token(), original)
         clock.now += 31 * 60  # TTL is 60 minutes
-        time.sleep(1.1)       # JWT iat has one-second resolution
+        time.sleep(1.1)  # JWT iat has one-second resolution
         credentials.refresh()
         self.assertNotEqual(credentials.token(), original)
-        claims = decode_alert_token(credentials.token(), SECRET)
+        claims = SensorTokenService(SECRET).decode(credentials.token())
         self.assertEqual(claims['broker_id'], self.broker_id)
 
     def test_rotation_revokes_and_new_key_reenrolls(self):
         credentials = self._credentials()
         credentials.ensure(retry=False)
-        rotated = self._user_post(
-            f'/api/v1/brokers/{self.broker_id}/enrollment-key')
+        rotated = self._user_post(f'/api/v1/brokers/{self.broker_id}/enrollment-key')
         with self.assertRaises(EnrollmentError):
             credentials.refresh()
         self.assertTrue(credentials.revoked.is_set())
@@ -156,27 +167,14 @@ class CaptureEnrollmentTests(unittest.TestCase):
 
     def test_network_errors_are_retried(self):
         credentials = SensorCredentials(
-            ApiClient(f'http://127.0.0.1:{_free_port()}', timeout=0.5),
-            self.state.name, self.key)
+            ApiClient(f'http://127.0.0.1:{_free_port()}', timeout=0.5), self.state.name, self.key
+        )
         stopper = threading.Timer(1.5, credentials._stop.set)
         stopper.start()
         started = time.time()
         with self.assertRaises(OSError):
             credentials.ensure()
         self.assertGreater(time.time() - started, 1.0)
-
-
-class RenewingAgentTokenTests(unittest.TestCase):
-    def test_reissues_before_expiry(self):
-        clock = Clock()
-        provider = RenewingAgentToken(SECRET, ttl_minutes=10,
-                                      renew_before_seconds=60, clock=clock)
-        first = provider()
-        self.assertEqual(provider(), first)
-        self.assertEqual(decode_alert_token(first, SECRET)['type'], 'agent')
-        clock.now += 9 * 60 + 1
-        time.sleep(1.1)
-        self.assertNotEqual(provider(), first)
 
 
 if __name__ == '__main__':

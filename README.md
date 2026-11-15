@@ -13,16 +13,21 @@ captured traffic. The multi-attack version of the project lives in
 
 ## Architecture
 
-The project is a modular monolith. All application code lives under `src/`
-and is split into two modules that do not import each other:
+The project is a modular monolith. All application code lives under `src/`.
+`detection` and `auth` do not import each other (only through `auth.api`), and
+`capture` ships alone in the customer image, so it only uses `wire` and the
+standard library:
 
 ```text
 src/
-  detection/                 # always-on: capture, agent, alerts, reports
+  capture/                   # customer sidecar: tshark -> TCP features -> agent
+    domain/  application/  infrastructure/{tshark,enrollment,transport}/
+  wire/                      # shared capture <-> agent contract (NDJSON, hello)
+  detection/                 # always-on: agent, alerts, reports
     domain/                  # Alert, FrameContext, client metadata
     application/             # Agent, per-broker worker pool and ports
     infrastructure/
-      tshark/                # capture sidecar and asyncio socket server
+      transport/             # asyncio socket server that receives captures
       classifiers/           # TCP XGBoost model adapter
       sinks/                 # MQTT, daily JSONL and evidence sinks
       mqtt_client.py         # paho client factory
@@ -72,6 +77,94 @@ has its own bounded queue; when it fills, only that broker's connection is
 backpressured. The pool is capped at 256 workers and evicts workers idle for
 10 minutes.
 
+### Capture ↔ agent transport
+
+Both ends of the socket are split the same way: a small orchestrator owns the
+thread and the lifecycle, and delegates each concern to a piece with a mirror
+on the other side.
+
+```mermaid
+flowchart LR
+    subgraph C["capture/infrastructure/transport (client)"]
+        direction TB
+        SS["SocketSender<br/><i>orchestrates: send thread, batches, reconnects</i>"]
+        CF["connector_for"]
+        UC["UnixConnector"]
+        TC["TlsConnector"]
+        TA["TokenAuth<br/><i>sends hello, waits hello_ack</i>"]
+        Q["DropOldestQueue + SenderStats"]
+        CTX["tls_context.py<br/><i>client_tls_context</i>"]
+        SS --> CF
+        CF --> UC
+        CF --> TC
+        SS --> TA
+        SS --> Q
+        TC -.-> CTX
+    end
+
+    subgraph S["detection/infrastructure/transport (server)"]
+        direction TB
+        AS["AsyncSocketServer<br/><i>orchestrates: event loop thread, accept</i>"]
+        LF["listener_for"]
+        UL["UnixListener"]
+        TL["TlsListener"]
+        SA["SensorAuth<br/><i>reads hello, replies hello_ack</i>"]
+        SI["SensorIdentity<br/><i>bind + token expiry</i>"]
+        CL["ConnectionLimiter"]
+        SC["SensorConnection<br/><i>one stream: read, bind, parse, route</i>"]
+        STLS["server_tls.py<br/><i>server_ssl_context + CertificateReloader</i>"]
+        AS --> LF
+        LF --> UL
+        LF --> TL
+        AS --> CL
+        AS --> SC
+        SC --> SA
+        SA --> SI
+        TL -.-> STLS
+    end
+
+    UC == "unix:///… (dev)" ==> UL
+    TC == "tls://host:8443 (prod)" ==> TL
+    TA -. "hello / hello_ack (wire.protocol)" .-> SA
+```
+
+| Capture (client) | Agent (server) |
+|---|---|
+| `SocketSender` (orchestrates) | `AsyncSocketServer` (orchestrates) |
+| `connector_for` / `UnixConnector` / `TlsConnector` | `listener_for` / `UnixListener` / `TlsListener` |
+| `TokenAuth` (sends `hello`, waits for `hello_ack`) | `SensorAuth` (reads `hello`, replies `hello_ack`) |
+| `DropOldestQueue` / `SenderStats` | `ConnectionLimiter` |
+| `tls_context.py` | `server_tls.py` |
+
+One TLS connection, end to end:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant SS as SocketSender
+    participant TA as TokenAuth
+    participant TL as TlsListener
+    participant SC as SensorConnection
+    participant SA as SensorAuth
+    participant BP as BrokerPool
+
+    SS->>TL: TCP + TLS handshake (CA and server name from enrollment)
+    TL->>SC: new connection (ConnectionLimiter admits it)
+    TA->>SA: hello frame with the sensor JWT
+    SA->>SA: validate JWT, build SensorIdentity (tenant, broker, sensor, exp)
+    SA-->>TA: hello_ack
+    loop until token expiry, error or stop
+        SS->>SC: NDJSON batch (one record per frame)
+        SC->>SC: SensorIdentity.bind(record) rejects spoofing
+        SC->>BP: route(Frame) to the (tenant, broker) worker
+    end
+    Note over SS,TA: token renewed by enrollment, SocketSender reconnects with it
+    Note over SC: token expired, server closes the connection
+```
+
+On a `unix://` endpoint (local development) there is no TLS and no `hello`:
+`SensorAuth.required` is false and the connection has no identity.
+
 ## Requirements
 
 - Docker Engine with Docker Compose v2, or Podman with `podman-compose`.
@@ -85,24 +178,37 @@ under [`modelos_agente_tcp/`](modelos_agente_tcp/); do not edit them manually.
 
 ## Quick start with Compose
 
+There are two Compose files. `docker-compose.yml` is the central (auth,
+detection API, agent, ETL and reports) and `docker-compose.capture.yml` is the
+capture a customer installs next to their broker. The central's profile is
+chosen in `.env` with `COMPOSE_PROFILES` (`dev` or `prod`, see
+[`.env.example`](.env.example)).
+
 From the repository root:
 
 ```bash
+cp .env.example .env          # set AUTH_JWT_SECRET; COMPOSE_PROFILES=dev
 docker compose up --build
 ```
 
-The command starts the detection stack without Ollama or the simulator:
+The `dev` profile starts the central plus a local broker to capture, without
+Ollama or the simulator:
 
 1. `certgen`, which creates the local Mosquitto and agent TLS certificates.
-2. `bootstrap`, which registers the local Mosquitto as a broker, exactly like
+2. `redis`, `mailhog` and `auth-api` (host port `8001`). Verification emails
+   go to MailHog at `http://localhost:8025` unless `AUTH_SMTP_*` is set.
+3. `bootstrap`, which registers the local Mosquitto as a broker, exactly like
    "Add broker" in the web, and leaves its enrollment key for the local
-   capture. It is idempotent and runs before `capture` and `agente`.
-3. `mosquitto`, listening on MQTT `1883` and MQTTS `8883`.
-4. `report-api`, available on host port `8000`.
-5. `capture` and `agente`. The capture enrolls itself with that key, as a
+   capture. It is idempotent and runs before `capture`.
+4. `mosquitto`, listening on MQTT `1883` and MQTTS `8883`.
+5. `report-api`, available on host port `8000`.
+6. `capture` and `agente`. The capture enrolls itself with that key, as a
    customer installation does, and the agent posts every alert to
    `/api/v1/alerts`, so the per-broker reports include the simulator traffic.
-6. `etl`, which periodically normalizes alerts and refreshes summaries.
+7. `etl`, which periodically normalizes alerts and refreshes summaries.
+
+Host ports are bound to `127.0.0.1`; set `API_BIND` or `MQTT_BIND` to expose
+them on other interfaces.
 
 Set `DEV_TENANT_ID` in `.env` to your user id (`GET /api/v1/auth/me`) so the
 local broker belongs to your account. If it is empty, it is registered under the
@@ -216,7 +322,7 @@ For a local run, export `PYTHONPATH=src` and start a broker, capture, and agent 
 separate terminals:
 
 ```bash
-python -m detection.infrastructure.tshark.stream_features \
+python -m capture \
   --iface eth0 --filter "" \
   --exclude-topic alertas/deteccion --endpoint unix:///tmp/features.sock
 
@@ -234,10 +340,12 @@ python -m simulation --broker localhost --port 1883 \
 The step-by-step guide is in [`docs/instalacion.md`](docs/instalacion.md). In
 short:
 
-1. The central runs `docker-compose.yml` plus `docker-compose.prod.yml`:
-   Caddy terminates HTTPS with Let's Encrypt for `API_DOMAIN`, and the agent
+1. The central runs `docker-compose.yml` with `COMPOSE_PROFILES=prod` and
+   `AGENT_CERT_MODE=public`: Caddy terminates HTTPS with Let's Encrypt for
+   `API_DOMAIN` and routes `/api/v1/auth/*` to `auth-api`, and the agent
    listens on TLS `8443` with the certificate of `AGENT_DOMAIN`, reloaded when
-   Caddy renews it.
+   Caddy renews it. The customer side uses `docker-compose.capture.yml` or the
+   equivalent `docker run` shown by the web.
 2. The user adds a broker in the web (`POST /api/v1/brokers`). The response has
    an `enrollment_key` and an `install_command`, shown once.
 3. The customer pastes the command next to their Mosquitto. The capture enrolls
@@ -613,6 +721,15 @@ Run the complete unit-test suite from the repository root:
 
 ```bash
 PYTHONPATH=src python -m unittest discover -s tests -v
+```
+
+Formatting and linting use [Ruff](https://docs.astral.sh/ruff/), configured in
+[`pyproject.toml`](pyproject.toml). The pre-commit hook runs it on every commit:
+
+```bash
+pip install -r requirements-dev.txt
+pre-commit install          # once per clone
+ruff check --fix . && ruff format .   # manual run
 ```
 
 Additional component documentation is available in

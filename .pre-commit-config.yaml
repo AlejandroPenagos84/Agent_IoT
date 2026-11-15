@@ -1,0 +1,10 @@
+# Instalar una vez: pip install -r requirements-dev.txt && pre-commit install
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.5   # misma versión que requirements-dev.txt
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+        types_or: [python, pyi]
+      - id: ruff-format
+        types_or: [python, pyi]

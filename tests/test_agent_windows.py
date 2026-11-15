@@ -1,11 +1,11 @@
 import unittest
 
+from capture.infrastructure.tshark import CAPTURE_FIELDS, record_from_fields
 from detection.application.ports.ports_out import AlertSink, Classifier, FeatureSource
 from detection.application.ports.types import Frame
 from detection.application.use_cases.agent import Agent
 from detection.domain.model import FrameContext
-from detection.infrastructure.tshark.record_parser import RecordParser
-from detection.infrastructure.tshark.stream_features import CAPTURE_FIELDS, record_from_fields
+from detection.infrastructure.transport.record_parser import RecordParser
 
 
 class Source(FeatureSource):
@@ -39,16 +39,26 @@ class Sink(AlertSink):
 def frame(client, index, stream=1, reverse=False, sensor='s1'):
     src, dst = ('broker', client) if not reverse else (client, 'broker')
     sport, dport = (1883, 40000) if not reverse else (40000, 1883)
-    return Frame({'marker': index}, FrameContext(
-        ts=float(index), ip=src, dst_ip=dst, srcport=sport, dstport=dport,
-        stream_id=stream, topic=f'topic/{index}', tenant_id='t',
-        broker_id='b', sensor_id=sensor))
+    return Frame(
+        {'marker': index},
+        FrameContext(
+            ts=float(index),
+            ip=src,
+            dst_ip=dst,
+            srcport=sport,
+            dstport=dport,
+            stream_id=stream,
+            topic=f'topic/{index}',
+            tenant_id='t',
+            broker_id='b',
+            sensor_id=sensor,
+        ),
+    )
 
 
 def record(values):
     data = record_from_fields([values.get(field, '') for field in CAPTURE_FIELDS])
-    data.update({key: value for key, value in values.items()
-                 if key not in CAPTURE_FIELDS})
+    data.update({key: value for key, value in values.items() if key not in CAPTURE_FIELDS})
     return data
 
 
@@ -59,25 +69,25 @@ class WindowTests(unittest.TestCase):
         return classifier, sink
 
     def test_broker_responses_to_different_ips_do_not_mix(self):
-        frames = [f for i in range(11)
-                  for f in (frame('a', i), frame('b', i))]
+        frames = [f for i in range(11) for f in (frame('a', i), frame('b', i))]
         classifier, sink = self.run_agent(frames)
         self.assertEqual(len(classifier.windows), 2)
         self.assertEqual(len(sink.alerts), 2)
 
     def test_same_stream_on_different_sensors_does_not_mix(self):
-        frames = [f for i in range(11)
-                  for f in (frame('a', i, sensor='s1'),
-                            frame('a', i, sensor='s2'))]
+        frames = [
+            f for i in range(11) for f in (frame('a', i, sensor='s1'), frame('a', i, sensor='s2'))
+        ]
         classifier, sink = self.run_agent(frames)
         self.assertEqual(len(classifier.windows), 2)
-        self.assertEqual({alert.sensor_id for alert in sink.alerts},
-                         {'s1', 's2'})
+        self.assertEqual({alert.sensor_id for alert in sink.alerts}, {'s1', 's2'})
 
     def test_directions_and_reused_connections_do_not_mix(self):
-        frames = [f for i in range(6) for f in (
-            frame('a', i), frame('a', i, reverse=True),
-            frame('a', i, stream=2))]
+        frames = [
+            f
+            for i in range(6)
+            for f in (frame('a', i), frame('a', i, reverse=True), frame('a', i, stream=2))
+        ]
         classifier, sink = self.run_agent(frames)
         self.assertEqual(classifier.windows, [])
         self.assertEqual(sink.alerts, [])
@@ -91,14 +101,20 @@ class WindowTests(unittest.TestCase):
         for per_flow in (True, False):
             with self.subTest(per_flow=per_flow):
                 classifier, sink = self.run_agent(
-                    [frame('a', i) for i in range(11)], per_flow=per_flow)
+                    [frame('a', i) for i in range(11)], per_flow=per_flow
+                )
                 self.assertEqual(classifier.windows[-1][-1]['marker'], 10)
                 self.assertEqual(sink.alerts[-1].ts, 10)
                 self.assertEqual(sink.alerts[-1].topic, 'topic/10')
 
     def test_capture_context_is_not_a_model_feature(self):
-        values = {'ip.src': 'broker', 'ip.dst': 'a', 'tcp.srcport': '1883',
-                  'tcp.dstport': '40000', 'tcp.stream': '7'}
+        values = {
+            'ip.src': 'broker',
+            'ip.dst': 'a',
+            'tcp.srcport': '1883',
+            'tcp.dstport': '40000',
+            'tcp.stream': '7',
+        }
         parser = RecordParser()
         parsed = record(values)
         context = parser.context(parsed)
@@ -112,10 +128,12 @@ class FlowContextTests(unittest.TestCase):
         self.parser = RecordParser()
 
     def test_connect_client_id_and_topic_are_remembered(self):
-        self.parser.context(record({'tcp.stream': '7', 'mqtt.msgtype': '1',
-                                    'mqtt.clientid': 'sensor1'}))
-        publish = self.parser.context(record({'tcp.stream': '7', 'mqtt.msgtype': '3',
-                                              'mqtt.topic': 'home/temp'}))
+        self.parser.context(
+            record({'tcp.stream': '7', 'mqtt.msgtype': '1', 'mqtt.clientid': 'sensor1'})
+        )
+        publish = self.parser.context(
+            record({'tcp.stream': '7', 'mqtt.msgtype': '3', 'mqtt.topic': 'home/temp'})
+        )
         self.assertEqual(publish.client_id, 'sensor1')
         self.assertEqual(publish.topic, 'home/temp')
         ack = self.parser.context(record({'tcp.stream': '7', 'mqtt.msgtype': '3'}))
@@ -123,8 +141,7 @@ class FlowContextTests(unittest.TestCase):
         self.assertEqual(ack.topic, 'home/temp')
 
     def test_streams_do_not_share_state(self):
-        self.parser.context(record({'tcp.stream': '1', 'mqtt.clientid': 'a',
-                                    'mqtt.topic': 't/a'}))
+        self.parser.context(record({'tcp.stream': '1', 'mqtt.clientid': 'a', 'mqtt.topic': 't/a'}))
         self.parser.context(record({'tcp.stream': '2', 'mqtt.clientid': 'b'}))
         second = self.parser.context(record({'tcp.stream': '2'}))
         self.assertEqual(second.client_id, 'b')
@@ -146,7 +163,6 @@ class FlowContextTests(unittest.TestCase):
 
     def test_streams_are_isolated_by_sensor(self):
         base = {'tenant_id': 't', 'broker_id': 'b', 'tcp.stream': '7'}
-        self.parser.context(record({**base, 'sensor_id': 's1',
-                                    'mqtt.clientid': 'a'}))
+        self.parser.context(record({**base, 'sensor_id': 's1', 'mqtt.clientid': 'a'}))
         other = self.parser.context(record({**base, 'sensor_id': 's2'}))
         self.assertIsNone(other.client_id)

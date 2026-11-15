@@ -44,9 +44,7 @@ class Simulator:
     def _publish(self, client_id, topic, payload, kind, qos=0):
         rc = self.publisher(client_id).publish(topic, payload, qos)
         if rc != 0:
-            raise RuntimeError(
-                f'Publicación fallida: client={client_id}, topic={topic}, rc={rc}'
-            )
+            raise RuntimeError(f'Publicación fallida: client={client_id}, topic={topic}, rc={rc}')
         self._refresh_time()
         self._log(client_id, topic, payload, kind)
         self.emitted += 1
@@ -89,8 +87,7 @@ class Simulator:
     def _log(self, client_id, topic, payload, origen):
         """Print one message when verbose or dry-run output is enabled."""
         if self.args.verbose or self.args.dry_run:
-            print(f"[t={self.t:7.2f}] {origen:7s} | {client_id:16s} "
-                  f"-> {topic} | {payload!r}")
+            print(f'[t={self.t:7.2f}] {origen:7s} | {client_id:16s} -> {topic} | {payload!r}')
 
     def normal_tick(self):
         """Publish devices whose scheduled timestamp has elapsed."""
@@ -98,13 +95,9 @@ class Simulator:
             if self.emitted >= self.args.paquetes:
                 break
             if self.t >= device.next_time:
-                device.next_time = (
-                    self.t + device.interval + random.uniform(-0.2, 0.2)
-                )
+                device.next_time = self.t + device.interval + random.uniform(-0.2, 0.2)
                 payload = device.next_payload()
-                self._publish(
-                    device.id, device.topic, payload, 'normal', device.qos
-                )
+                self._publish(device.id, device.topic, payload, 'normal', device.qos)
 
     def attack_burst(self):
         """Run one DoS burst in the configured mode."""
@@ -120,16 +113,20 @@ class Simulator:
             for packet in packets:
                 rc = publisher.publish(packet.topic, packet.payload, packet.qos)
                 if rc != 0:
-                    raise RuntimeError(f'Publicación fallida: client={packet.client_id}, '
-                                       f'topic={packet.topic}, rc={rc}')
+                    raise RuntimeError(
+                        f'Publicación fallida: client={packet.client_id}, '
+                        f'topic={packet.topic}, rc={rc}'
+                    )
                 with self._lock:
                     self.emitted += 1
                     self.counts['dos'] += 1
         finally:
             publisher.stop()
         if self.args.verbose or self.args.dry_run:
-            print(f"[t={self.t:7.2f}] dos     | {packets[0].client_id:16s} "
-                  f"-> {len(packets)} publicaciones y desconexión")
+            print(
+                f'[t={self.t:7.2f}] dos     | {packets[0].client_id:16s} '
+                f'-> {len(packets)} publicaciones y desconexión'
+            )
 
     def flood_burst(self):
         """Flood of new connections, like mqtt-malaria in `DoS.csv`.
@@ -141,13 +138,16 @@ class Simulator:
         burst = min(self.args.burst_size, self.args.paquetes - self.emitted)
         clients = min(self.args.dos_clients, burst)
         shares = [burst // clients + (1 if i < burst % clients else 0) for i in range(clients)]
-        plans = [build_flood_packets(self._bursts, i, n, self.args.dos_payload_size)
-                 for i, n in enumerate(shares)]
+        plans = [
+            build_flood_packets(self._bursts, i, n, self.args.dos_payload_size)
+            for i, n in enumerate(shares)
+        ]
         self._bursts += 1
         self._refresh_time()
         started = self.t
-        print(f"    >>> Ráfaga 'dos' (flood): {clients} conexiones nuevas, "
-              f"{burst} publicaciones <<<")
+        print(
+            f"    >>> Ráfaga 'dos' (flood): {clients} conexiones nuevas, {burst} publicaciones <<<"
+        )
         with ThreadPoolExecutor(max_workers=clients) as pool:
             for future in [pool.submit(self._flood_client, plan) for plan in plans]:
                 future.result()
@@ -174,9 +174,7 @@ class Simulator:
             self.publisher(packet.client_id)
         self._refresh_time()
         started = self.t
-        print(
-            f"    >>> Ráfaga '{tipo}': {burst} publicaciones, objetivo={rate:g}/s <<<"
-        )
+        print(f"    >>> Ráfaga '{tipo}': {burst} publicaciones, objetivo={rate:g}/s <<<")
         for index in range(burst):
             self._wait(max(0, started + index / rate - self.t))
             packet = packet_at(index)
@@ -189,20 +187,16 @@ class Simulator:
             )
         elapsed = self.t - started
         measured = (burst - 1) / elapsed if burst > 1 and elapsed > 0 else 0
-        print(
-            f"    >>> Fin '{tipo}': {elapsed:.3f}s, ritmo={measured:.1f}/s <<<"
-        )
+        print(f"    >>> Fin '{tipo}': {elapsed:.3f}s, ritmo={measured:.1f}/s <<<")
 
     def run(self):
         """Run until the requested message count or user interruption."""
         self._started = time.monotonic()
-        next_attack = (
-            0.0 if self.args.force_attack else random.uniform(3.0, 6.0)
-        )
+        next_attack = 0.0 if self.args.force_attack else random.uniform(3.0, 6.0)
         print(
-            f"\nSimulando {self.args.paquetes} publicaciones MQTT "
-            f"(broker={self.args.broker}:{self.args.port}, "
-            f"ataque={self.args.ataque}). Ctrl+C para detener.\n"
+            f'\nSimulando {self.args.paquetes} publicaciones MQTT '
+            f'(broker={self.args.broker}:{self.args.port}, '
+            f'ataque={self.args.ataque}). Ctrl+C para detener.\n'
         )
         try:
             while self.emitted < self.args.paquetes:
@@ -211,15 +205,15 @@ class Simulator:
                     self.attack_burst()
                     next_attack = self.t + self.args.attack_gap
                     if self.args.debug:
-                        print(f"[debug] next_attack = {next_attack:.2f}")
+                        print(f'[debug] next_attack = {next_attack:.2f}')
                 self.normal_tick()
                 if self.emitted < self.args.paquetes:
                     self._wait(self.args.intervalo)
         except KeyboardInterrupt:
-            print("\nSimulación detenida por el usuario.")
+            print('\nSimulación detenida por el usuario.')
         finally:
             self.stop()
-        print(f"\nFinalizado: {self.emitted} publicaciones completadas; {self.counts}")
+        print(f'\nFinalizado: {self.emitted} publicaciones completadas; {self.counts}')
 
     def stop(self):
         """Stop every cached publisher."""
@@ -230,6 +224,4 @@ class Simulator:
             except Exception as exc:
                 errors.append(str(exc))
         if errors:
-            raise RuntimeError(
-                'Error al completar publicaciones: ' + '; '.join(errors)
-            )
+            raise RuntimeError('Error al completar publicaciones: ' + '; '.join(errors))

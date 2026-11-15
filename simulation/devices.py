@@ -7,6 +7,7 @@ import random
 
 class IoTDevice:
     """Periodic publisher definition for one simulated device."""
+
     def __init__(self, device_id, topic, payloads, interval, qos=0):
         """Configure identity, topic, payload choices, interval, and QoS."""
         self.id = device_id

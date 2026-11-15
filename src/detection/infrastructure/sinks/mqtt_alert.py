@@ -28,18 +28,14 @@ class MqttAlertSink(AlertSink):
         self.qos = qos
         self.retain = retain
         self.last_rc = None
-        self._client = make_client(
-            client_id, username=username, password=password, tls=tls
-        )
+        self._client = make_client(client_id, username=username, password=password, tls=tls)
         self._client.connect(host, port, keepalive)
         self._client.loop_start()
 
     def emit(self, alert: Alert) -> None:
         """Publish one alert and retain the broker return code."""
         payload = json.dumps(alert.to_dict())
-        info = self._client.publish(
-            self.topic, payload, qos=self.qos, retain=self.retain
-        )
+        info = self._client.publish(self.topic, payload, qos=self.qos, retain=self.retain)
         self.last_rc = info.rc
 
     def close(self) -> None:

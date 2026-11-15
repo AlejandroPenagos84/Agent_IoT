@@ -37,9 +37,9 @@ from auth.http.schemas import (
     VerifyEmailRequest,
 )
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix='/auth', tags=['auth'])
 
-RESEND_MESSAGE = "If the account is pending, a new verification code was sent."
+RESEND_MESSAGE = 'If the account is pending, a new verification code was sent.'
 
 
 def _set_refresh_cookie(response: Response, token: str, container: AuthContainer) -> None:
@@ -64,8 +64,7 @@ def _clear_refresh_cookie(response: Response, container: AuthContainer) -> None:
     )
 
 
-@router.post("/register", status_code=status.HTTP_201_CREATED,
-             response_model=RegisterResponse)
+@router.post('/register', status_code=status.HTTP_201_CREATED, response_model=RegisterResponse)
 def register(
     payload: RegisterRequest,
     use_case: Annotated[RegisterUser, Depends(get_register)],
@@ -74,7 +73,7 @@ def register(
     return RegisterResponse.from_result(result)
 
 
-@router.post("/verify-email", response_model=UserResponse)
+@router.post('/verify-email', response_model=UserResponse)
 def verify_email(
     payload: VerifyEmailRequest,
     use_case: Annotated[VerifyEmail, Depends(get_verify_email)],
@@ -82,8 +81,9 @@ def verify_email(
     return UserResponse.from_user(use_case.execute(payload.email, payload.code))
 
 
-@router.post("/resend-verification", status_code=status.HTTP_202_ACCEPTED,
-             response_model=MessageResponse)
+@router.post(
+    '/resend-verification', status_code=status.HTTP_202_ACCEPTED, response_model=MessageResponse
+)
 def resend_verification(
     payload: ResendVerificationRequest,
     use_case: Annotated[ResendVerification, Depends(get_resend_verification)],
@@ -92,7 +92,7 @@ def resend_verification(
     return MessageResponse(message=RESEND_MESSAGE)
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post('/login', response_model=TokenResponse)
 def login(
     payload: LoginRequest,
     response: Response,
@@ -107,7 +107,7 @@ def login(
     )
 
 
-@router.post("/refresh", response_model=TokenResponse)
+@router.post('/refresh', response_model=TokenResponse)
 def refresh(
     response: Response,
     refresh_token: Annotated[str, Depends(get_refresh_token)],
@@ -122,7 +122,7 @@ def refresh(
     )
 
 
-@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+@router.post('/logout', status_code=status.HTTP_204_NO_CONTENT)
 def logout(
     response: Response,
     refresh_token: Annotated[str | None, Depends(get_optional_refresh_token)],
@@ -134,6 +134,6 @@ def logout(
     _clear_refresh_cookie(response, container)
 
 
-@router.get("/me", response_model=UserResponse)
+@router.get('/me', response_model=UserResponse)
 def me(user: Annotated[User, Depends(get_current_user)]) -> UserResponse:
     return UserResponse.from_user(user)

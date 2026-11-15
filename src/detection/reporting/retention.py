@@ -5,14 +5,14 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 DATE_FORMAT = '%Y-%m-%d'
 
 
 def _today() -> date:
-    return datetime.now(timezone.utc).date()
+    return datetime.now(UTC).date()
 
 
 def _parse_day(value: str) -> date | None:
@@ -22,8 +22,7 @@ def _parse_day(value: str) -> date | None:
         return None
 
 
-def prune_evidence(root: str | Path, retention_days: int,
-                   today: date | None = None) -> list[Path]:
+def prune_evidence(root: str | Path, retention_days: int, today: date | None = None) -> list[Path]:
     """Delete ``YYYY-MM-DD`` evidence folders older than ``retention_days``."""
     if retention_days <= 0:
         return []
@@ -43,8 +42,9 @@ def prune_evidence(root: str | Path, retention_days: int,
     return removed
 
 
-def prune_daily_alerts(directory: str | Path, retention_days: int,
-                       today: date | None = None) -> list[Path]:
+def prune_daily_alerts(
+    directory: str | Path, retention_days: int, today: date | None = None
+) -> list[Path]:
     """Delete ``YYYY-MM-DD.jsonl`` daily alerts older than ``retention_days``."""
     if retention_days <= 0:
         return []
@@ -73,18 +73,23 @@ def _env_int(name: str, default: int) -> int:
 
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(
-        description='Delete evidence and daily alert files past their retention.')
+        description='Delete evidence and daily alert files past their retention.'
+    )
     parser.add_argument('--evidence-dir', default=os.getenv('EVIDENCE_DIR', '/evidence'))
-    parser.add_argument('--evidence-retention-days', type=int,
-                        default=_env_int('EVIDENCE_RETENTION_DAYS', 30))
+    parser.add_argument(
+        '--evidence-retention-days', type=int, default=_env_int('EVIDENCE_RETENTION_DAYS', 30)
+    )
     parser.add_argument('--alert-dir', default=os.getenv('ALERT_DIR', '/alerts'))
-    parser.add_argument('--alert-retention-days', type=int,
-                        default=_env_int('ALERT_RETENTION_DAYS', 0))
+    parser.add_argument(
+        '--alert-retention-days', type=int, default=_env_int('ALERT_RETENTION_DAYS', 0)
+    )
     args = parser.parse_args(argv)
     evidence = prune_evidence(args.evidence_dir, args.evidence_retention_days)
     alerts = prune_daily_alerts(args.alert_dir, args.alert_retention_days)
-    print(f'Retención: {len(evidence)} carpetas de evidencia y '
-          f'{len(alerts)} archivos de alertas borrados')
+    print(
+        f'Retención: {len(evidence)} carpetas de evidencia y '
+        f'{len(alerts)} archivos de alertas borrados'
+    )
 
 
 if __name__ == '__main__':

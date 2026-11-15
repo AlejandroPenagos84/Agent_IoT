@@ -9,13 +9,16 @@ from detection.domain.model import FrameContext
 FeatureRow = dict[str, float | int | str | None]
 
 
-'''
+"""
 Represents a captured frame: its network features plus the context
 (client_id, ip, topic, ports) that enriches the emitted Alert.
-'''
+"""
+
+
 @dataclass(frozen=True, slots=True)
 class Frame:
     """Network features and metadata for one captured frame."""
+
     features: FeatureRow
     context: FrameContext
     record: dict | None = None

@@ -23,8 +23,8 @@ from auth.application.errors import (
 from auth.domain.errors import (
     InvalidEmail,
     InvalidPassword,
-    InvalidUserState,
     InvalidUsername,
+    InvalidUserState,
     UserNotActive,
     UserNotPending,
 )
@@ -42,29 +42,29 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 ERROR_MAP: dict[type[AuthError], tuple[int, str]] = {
-    InvalidEmail: (422, "INVALID_EMAIL"),
-    InvalidUsername: (422, "INVALID_USERNAME"),
-    InvalidPassword: (422, "INVALID_PASSWORD"),
-    InvalidUserState: (409, "INVALID_USER_STATE"),
-    UserNotPending: (409, "USER_NOT_PENDING"),
-    UserNotActive: (409, "USER_NOT_ACTIVE"),
-    InvalidCredentials: (401, "INVALID_CREDENTIALS"),
-    AccountNotVerified: (403, "ACCOUNT_NOT_VERIFIED"),
-    AccountDisabled: (403, "ACCOUNT_DISABLED"),
-    UserAlreadyExists: (409, "USER_ALREADY_EXISTS"),
-    InvalidCode: (400, "INVALID_CODE"),
-    TooManyRequests: (429, "TOO_MANY_REQUESTS"),
-    InvalidToken: (401, "INVALID_TOKEN"),
-    ExpiredToken: (401, "TOKEN_EXPIRED"),
-    MalformedToken: (401, "TOKEN_MALFORMED"),
-    TokenTypeMismatch: (401, "TOKEN_TYPE_MISMATCH"),
-    TokenMissingFamily: (401, "TOKEN_MISSING_FAMILY"),
-    RevokedToken: (401, "TOKEN_REVOKED"),
-    RefreshTokenReused: (401, "REFRESH_TOKEN_REUSED"),
-    DuplicateRecord: (409, "DUPLICATE_RECORD"),
-    RecordNotFound: (404, "RECORD_NOT_FOUND"),
-    DatabaseUnavailable: (503, "DATABASE_UNAVAILABLE"),
-    CodeStoreUnavailable: (503, "CODE_STORE_UNAVAILABLE"),
+    InvalidEmail: (422, 'INVALID_EMAIL'),
+    InvalidUsername: (422, 'INVALID_USERNAME'),
+    InvalidPassword: (422, 'INVALID_PASSWORD'),
+    InvalidUserState: (409, 'INVALID_USER_STATE'),
+    UserNotPending: (409, 'USER_NOT_PENDING'),
+    UserNotActive: (409, 'USER_NOT_ACTIVE'),
+    InvalidCredentials: (401, 'INVALID_CREDENTIALS'),
+    AccountNotVerified: (403, 'ACCOUNT_NOT_VERIFIED'),
+    AccountDisabled: (403, 'ACCOUNT_DISABLED'),
+    UserAlreadyExists: (409, 'USER_ALREADY_EXISTS'),
+    InvalidCode: (400, 'INVALID_CODE'),
+    TooManyRequests: (429, 'TOO_MANY_REQUESTS'),
+    InvalidToken: (401, 'INVALID_TOKEN'),
+    ExpiredToken: (401, 'TOKEN_EXPIRED'),
+    MalformedToken: (401, 'TOKEN_MALFORMED'),
+    TokenTypeMismatch: (401, 'TOKEN_TYPE_MISMATCH'),
+    TokenMissingFamily: (401, 'TOKEN_MISSING_FAMILY'),
+    RevokedToken: (401, 'TOKEN_REVOKED'),
+    RefreshTokenReused: (401, 'REFRESH_TOKEN_REUSED'),
+    DuplicateRecord: (409, 'DUPLICATE_RECORD'),
+    RecordNotFound: (404, 'RECORD_NOT_FOUND'),
+    DatabaseUnavailable: (503, 'DATABASE_UNAVAILABLE'),
+    CodeStoreUnavailable: (503, 'CODE_STORE_UNAVAILABLE'),
 }
 
 
@@ -74,8 +74,8 @@ def resolve_error(exc: Exception) -> tuple[int, str]:
         if mapped is not None:
             return mapped
     if isinstance(exc, AuthError):
-        return 400, "AUTH_ERROR"
-    return 500, "INTERNAL_ERROR"
+        return 400, 'AUTH_ERROR'
+    return 500, 'INTERNAL_ERROR'
 
 
 def _response(status_code: int, code: str, message: str):
@@ -83,40 +83,40 @@ def _response(status_code: int, code: str, message: str):
 
     return JSONResponse(
         status_code=status_code,
-        content={"error": {"code": code, "message": message}},
+        content={'error': {'code': code, 'message': message}},
     )
 
 
-async def auth_error_handler(request: "Request", exc: AuthError):
+async def auth_error_handler(request: Request, exc: AuthError):
     status_code, code = resolve_error(exc)
     if status_code >= 500:
-        logger.error("Auth infrastructure error", exc_info=(type(exc), exc, exc.__traceback__))
+        logger.error('Auth infrastructure error', exc_info=(type(exc), exc, exc.__traceback__))
     return _response(status_code, code, str(exc) or code)
 
 
-async def validation_error_handler(request: "Request", exc: Exception):
+async def validation_error_handler(request: Request, exc: Exception):
     from fastapi.encoders import jsonable_encoder
     from fastapi.responses import JSONResponse
 
-    errors = getattr(exc, "errors", lambda: [])()
+    errors = getattr(exc, 'errors', lambda: [])()
     return JSONResponse(
         status_code=422,
         content={
-            "error": {
-                "code": "VALIDATION_ERROR",
-                "message": "Request validation failed",
-                "details": jsonable_encoder(errors),
+            'error': {
+                'code': 'VALIDATION_ERROR',
+                'message': 'Request validation failed',
+                'details': jsonable_encoder(errors),
             }
         },
     )
 
 
-async def unhandled_error_handler(request: "Request", exc: Exception):
-    logger.error("Unhandled error", exc_info=(type(exc), exc, exc.__traceback__))
-    return _response(500, "INTERNAL_ERROR", "Internal server error")
+async def unhandled_error_handler(request: Request, exc: Exception):
+    logger.error('Unhandled error', exc_info=(type(exc), exc, exc.__traceback__))
+    return _response(500, 'INTERNAL_ERROR', 'Internal server error')
 
 
-def register_exception_handlers(app: "FastAPI") -> None:
+def register_exception_handlers(app: FastAPI) -> None:
     from fastapi.exceptions import RequestValidationError
 
     app.add_exception_handler(AuthError, auth_error_handler)

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+import threading
+from datetime import UTC, datetime
 from pathlib import Path
 
 from detection.application.ports.ports_out import AlertSink
@@ -15,12 +16,13 @@ class DailyFileAlertSink(AlertSink):
         self.directory = Path(directory)
         self.flush = flush
         self.directory.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
 
     def emit(self, alert: Alert) -> None:
         """Serialize an alert and append it to the file for its event date."""
-        day = datetime.fromtimestamp(alert.ts, timezone.utc).date().isoformat()
+        day = datetime.fromtimestamp(alert.ts, UTC).date().isoformat()
         path = self.directory / f'{day}.jsonl'
-        with path.open('a', encoding='utf-8') as handle:
+        with self._lock, path.open('a', encoding='utf-8') as handle:
             handle.write(json.dumps(alert.to_dict()) + '\n')
             if self.flush:
                 handle.flush()

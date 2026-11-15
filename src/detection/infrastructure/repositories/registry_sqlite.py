@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -71,7 +71,7 @@ class SensorExistsError(ValueError):
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -104,10 +104,14 @@ class RegistryStore:
         self.connection = connection
         self._lock = threading.Lock()
 
-    def create_broker(self, tenant_id: str, name: str,
-                      host: str | None = None,
-                      port: int | None = None,
-                      enrollment_key_hash: str | None = None) -> dict:
+    def create_broker(
+        self,
+        tenant_id: str,
+        name: str,
+        host: str | None = None,
+        port: int | None = None,
+        enrollment_key_hash: str | None = None,
+    ) -> dict:
         broker = {
             'id': str(uuid4()),
             'tenant_id': tenant_id,
@@ -122,28 +126,29 @@ class RegistryStore:
                 'INSERT INTO brokers (id, tenant_id, name, host, port, '
                 'enrollment_key_hash, created_at) VALUES (:id, :tenant_id, '
                 ':name, :host, :port, :enrollment_key_hash, :created_at)',
-                broker)
+                broker,
+            )
             self.connection.commit()
         return broker
 
-    def set_enrollment_key(self, tenant_id: str, broker_id: str,
-                           key_hash: str) -> bool:
+    def set_enrollment_key(self, tenant_id: str, broker_id: str, key_hash: str) -> bool:
         """Replace the broker key and revoke the current sensor credentials."""
         with self._lock:
             cursor = self.connection.execute(
-                'UPDATE brokers SET enrollment_key_hash = ? '
-                'WHERE tenant_id = ? AND id = ?', (key_hash, tenant_id, broker_id))
+                'UPDATE brokers SET enrollment_key_hash = ? WHERE tenant_id = ? AND id = ?',
+                (key_hash, tenant_id, broker_id),
+            )
             if cursor.rowcount:
                 self.connection.execute(
-                    'UPDATE sensors SET secret_hash = NULL WHERE broker_id = ?',
-                    (broker_id,))
+                    'UPDATE sensors SET secret_hash = NULL WHERE broker_id = ?', (broker_id,)
+                )
             self.connection.commit()
         return cursor.rowcount > 0
 
     def broker_by_enrollment_key(self, key_hash: str) -> dict | None:
         row = self.connection.execute(
-            'SELECT * FROM brokers WHERE enrollment_key_hash = ?',
-            (key_hash,)).fetchone()
+            'SELECT * FROM brokers WHERE enrollment_key_hash = ?', (key_hash,)
+        ).fetchone()
         return dict(row) if row else None
 
     def enroll_sensor(self, broker: dict, name: str, secret_hash: str) -> dict:
@@ -151,63 +156,72 @@ class RegistryStore:
         now = _now()
         with self._lock:
             row = self.connection.execute(
-                'SELECT * FROM sensors WHERE broker_id = ? ORDER BY created_at '
-                'LIMIT 1', (broker['id'],)).fetchone()
+                'SELECT * FROM sensors WHERE broker_id = ? ORDER BY created_at LIMIT 1',
+                (broker['id'],),
+            ).fetchone()
             if row is None:
-                sensor = {'id': str(uuid4()), 'tenant_id': broker['tenant_id'],
-                          'broker_id': broker['id'], 'name': name,
-                          'secret_hash': secret_hash, 'last_seen': now,
-                          'created_at': now}
+                sensor = {
+                    'id': str(uuid4()),
+                    'tenant_id': broker['tenant_id'],
+                    'broker_id': broker['id'],
+                    'name': name,
+                    'secret_hash': secret_hash,
+                    'last_seen': now,
+                    'created_at': now,
+                }
                 self.connection.execute(
                     'INSERT INTO sensors (id, tenant_id, broker_id, name, '
                     'secret_hash, last_seen, created_at) VALUES (:id, '
                     ':tenant_id, :broker_id, :name, :secret_hash, :last_seen, '
-                    ':created_at)', sensor)
+                    ':created_at)',
+                    sensor,
+                )
             else:
-                sensor = {**dict(row), 'name': name, 'secret_hash': secret_hash,
-                          'last_seen': now}
+                sensor = {**dict(row), 'name': name, 'secret_hash': secret_hash, 'last_seen': now}
                 self.connection.execute(
-                    'UPDATE sensors SET name = ?, secret_hash = ?, last_seen = ? '
-                    'WHERE id = ?', (name, secret_hash, now, sensor['id']))
+                    'UPDATE sensors SET name = ?, secret_hash = ?, last_seen = ? WHERE id = ?',
+                    (name, secret_hash, now, sensor['id']),
+                )
             self.connection.commit()
         return sensor
 
     def sensor_by_secret(self, secret_hash: str) -> dict | None:
         row = self.connection.execute(
-            'SELECT * FROM sensors WHERE secret_hash = ?',
-            (secret_hash,)).fetchone()
+            'SELECT * FROM sensors WHERE secret_hash = ?', (secret_hash,)
+        ).fetchone()
         return dict(row) if row else None
 
     def touch_sensor(self, sensor_id: str) -> None:
         with self._lock:
-            self.connection.execute('UPDATE sensors SET last_seen = ? WHERE id = ?',
-                                    (_now(), sensor_id))
+            self.connection.execute(
+                'UPDATE sensors SET last_seen = ? WHERE id = ?', (_now(), sensor_id)
+            )
             self.connection.commit()
 
     def broker_sensor(self, broker_id: str) -> dict | None:
         row = self.connection.execute(
-            'SELECT * FROM sensors WHERE broker_id = ? ORDER BY created_at LIMIT 1',
-            (broker_id,)).fetchone()
+            'SELECT * FROM sensors WHERE broker_id = ? ORDER BY created_at LIMIT 1', (broker_id,)
+        ).fetchone()
         return dict(row) if row else None
 
     def list_brokers(self, tenant_id: str) -> list[dict]:
         rows = self.connection.execute(
-            'SELECT * FROM brokers WHERE tenant_id = ? ORDER BY created_at',
-            (tenant_id,)).fetchall()
+            'SELECT * FROM brokers WHERE tenant_id = ? ORDER BY created_at', (tenant_id,)
+        ).fetchall()
         return [dict(row) for row in rows]
 
     def get_broker(self, tenant_id: str, broker_id: str) -> dict | None:
         row = self.connection.execute(
-            'SELECT * FROM brokers WHERE tenant_id = ? AND id = ?',
-            (tenant_id, broker_id)).fetchone()
+            'SELECT * FROM brokers WHERE tenant_id = ? AND id = ?', (tenant_id, broker_id)
+        ).fetchone()
         return dict(row) if row else None
 
     def delete_broker(self, tenant_id: str, broker_id: str) -> bool:
         """Delete one broker owned by ``tenant_id``; sensors cascade."""
         with self._lock:
             cursor = self.connection.execute(
-                'DELETE FROM brokers WHERE tenant_id = ? AND id = ?',
-                (tenant_id, broker_id))
+                'DELETE FROM brokers WHERE tenant_id = ? AND id = ?', (tenant_id, broker_id)
+            )
             self.connection.commit()
         return cursor.rowcount > 0
 
@@ -229,20 +243,22 @@ class RegistryStore:
             self.connection.execute(
                 'INSERT INTO sensors (id, tenant_id, broker_id, name, created_at) '
                 'VALUES (:id, :tenant_id, :broker_id, :name, :created_at)',
-                sensor)
+                sensor,
+            )
             self.connection.commit()
         return sensor
 
     def list_sensors(self, tenant_id: str, broker_id: str) -> list[dict]:
         rows = self.connection.execute(
-            'SELECT * FROM sensors WHERE tenant_id = ? AND broker_id = ? '
-            'ORDER BY created_at', (tenant_id, broker_id)).fetchall()
+            'SELECT * FROM sensors WHERE tenant_id = ? AND broker_id = ? ORDER BY created_at',
+            (tenant_id, broker_id),
+        ).fetchall()
         return [dict(row) for row in rows]
 
     def get_sensor(self, tenant_id: str, sensor_id: str) -> dict | None:
         row = self.connection.execute(
-            'SELECT * FROM sensors WHERE tenant_id = ? AND id = ?',
-            (tenant_id, sensor_id)).fetchone()
+            'SELECT * FROM sensors WHERE tenant_id = ? AND id = ?', (tenant_id, sensor_id)
+        ).fetchone()
         return dict(row) if row else None
 
     def add_alert(self, alert: dict) -> bool:
@@ -268,15 +284,21 @@ class RegistryStore:
                 'sensor_id, ts, kind, label, client_id, ip, topic, mse, source, '
                 'created_at) VALUES (:alert_id, :tenant_id, :broker_id, '
                 ':sensor_id, :ts, :kind, :label, :client_id, :ip, :topic, '
-                ':mse, :source, :created_at)', record)
+                ':mse, :source, :created_at)',
+                record,
+            )
             self.connection.commit()
         return cursor.rowcount > 0
 
-    def list_alerts(self, tenant_id: str, limit: int | None = 100,
-                    broker_id: str | None = None,
-                    sensor_id: str | None = None,
-                    since: float | None = None,
-                    until: float | None = None) -> list[dict]:
+    def list_alerts(
+        self,
+        tenant_id: str,
+        limit: int | None = 100,
+        broker_id: str | None = None,
+        sensor_id: str | None = None,
+        since: float | None = None,
+        until: float | None = None,
+    ) -> list[dict]:
         """Return the tenant's alerts, newest first.
 
         ``since`` is inclusive and ``until`` exclusive (epoch seconds).
@@ -305,6 +327,6 @@ class RegistryStore:
 
     def get_alert(self, tenant_id: str, alert_id: str) -> dict | None:
         row = self.connection.execute(
-            'SELECT * FROM alerts WHERE tenant_id = ? AND alert_id = ?',
-            (tenant_id, alert_id)).fetchone()
+            'SELECT * FROM alerts WHERE tenant_id = ? AND alert_id = ?', (tenant_id, alert_id)
+        ).fetchone()
         return dict(row) if row else None

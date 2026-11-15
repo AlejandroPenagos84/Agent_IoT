@@ -13,14 +13,14 @@ class TokenData:
 
 @dataclass(frozen=True, slots=True)
 class AccessClaims:
-    sub: str            # user_id
+    sub: str  # user_id
     jti: str
     exp: datetime
 
 
 @dataclass(frozen=True, slots=True)
 class RefreshClaims:
-    sub: str            # user_id
+    sub: str  # user_id
     jti: str
     family_id: str
     exp: datetime

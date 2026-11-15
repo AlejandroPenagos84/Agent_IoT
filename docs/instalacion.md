@@ -36,18 +36,26 @@ cliente no abre puertos de entrada ni toca su NAT.
    ```
 2. Completa en `.env`:
    ```env
+   COMPOSE_PROFILES=prod
    AUTH_JWT_SECRET=<64 caracteres hex>
+   AUTH_COOKIE_SECURE=true
    API_DOMAIN=api.tudominio.com
    AGENT_DOMAIN=agent.tudominio.com
    ACME_EMAIL=tu@correo.com
+   AGENT_CERT_MODE=public
+   PUBLIC_API_URL=https://api.tudominio.com
+   AGENT_PUBLIC_ENDPOINT=tls://agent.tudominio.com:8443
+   AGENT_TLS_SERVER_NAME=agent.tudominio.com
+   AGENT_CA_PATH=
    CAPTURE_IMAGE=ghcr.io/<tu-org>/agentiot-capture:latest
    ```
+   Con `COMPOSE_PROFILES=prod` arranca Caddy y no arrancan el Mosquitto de
+   prueba registrado por `bootstrap`, su captura ni MailHog.
    Configura también el SMTP real de `AUTH_SMTP_*` para los correos de
    verificación.
-3. Levanta auth y la central:
+3. Levanta la central (auth, API, agente, ETL y Caddy):
    ```bash
-   docker compose -f docker-compose.auth.yml up -d --build
-   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+   docker compose up -d --build
    ```
 4. Publica la imagen de la captura para que los clientes la descarguen:
    ```bash
@@ -57,7 +65,7 @@ cliente no abre puertos de entrada ni toca su NAT.
 5. Verifica:
    ```bash
    curl https://api.tudominio.com/health          # {"status":"ok"}
-   docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
+   docker compose ps
    ```
 
 Caddy obtiene y renueva los certificados de Let's Encrypt. El agente usa el
