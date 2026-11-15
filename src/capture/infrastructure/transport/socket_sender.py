@@ -79,11 +79,12 @@ class SocketSender(RecordSender):
         else:
             auth = TokenAuth.static(sensor_token)
 
+        stats = SenderStats(interval=stats_seconds)
         return cls(
             connector_for(endpoint, tls_context, server_name),
             auth,
-            DropOldestQueue(queue_size),
-            SenderStats(interval=stats_seconds),
+            DropOldestQueue(queue_size, on_drop=stats.on_dropped),
+            stats,
             retry_seconds=retry_seconds,
             connect_timeout=connect_timeout,
         )
@@ -122,12 +123,12 @@ class SocketSender(RecordSender):
 
         # Si el hilo corrió, ya imprimió el reporte final al salir.
         if self._thread is None:
-            self._stats.report(self._queue.dropped)
+            self._stats.report()
 
     @property
     def stats(self) -> dict:
         """Contadores acumulados: enviados, descartados y reconexiones."""
-        return self._stats.snapshot(self._queue.dropped)
+        return self._stats.snapshot()
 
     # ---- hilo de envío -----------------------------------------------------
     def _run(self) -> None:
@@ -157,12 +158,12 @@ class SocketSender(RecordSender):
                     sock = None
                     continue
 
-            self._stats.report_if_due(self._queue.dropped)
+            self._stats.report_if_due()
 
         if sock is not None:
             _close(sock)
 
-        self._stats.report(self._queue.dropped)
+        self._stats.report()
 
     def _connect(self) -> socket.socket | None:
         """Socket listo para enviar, o ``None`` si está en pausa o falló."""

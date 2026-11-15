@@ -9,10 +9,10 @@ import time
 
 
 class SenderStats:
-    """Enviados, descartados por fallo de envío y reconexiones.
+    """Enviados, descartados y reconexiones; único contador del sender.
 
-    Los descartes por cola llena los cuenta ``DropOldestQueue``; ``SocketSender``
-    suma ambos al exponer ``stats``.
+    Los descartes llegan por dos caminos: la cola llena (``DropOldestQueue``
+    llama a ``on_dropped``) y un lote cuyo envío falló (``SocketSender``).
     """
 
     def __init__(self, interval: float = 60.0, sink=sys.stderr, clock=time.monotonic):
@@ -43,21 +43,21 @@ class SenderStats:
         with self._lock:
             self.dropped += count
 
-    def snapshot(self, extra_dropped: int = 0) -> dict:
+    def snapshot(self) -> dict:
         with self._lock:
             return {
                 'sent': self.sent,
-                'dropped': self.dropped + extra_dropped,
+                'dropped': self.dropped,
                 'reconnects': self.reconnects,
             }
 
-    def report_if_due(self, extra_dropped: int = 0) -> None:
+    def report_if_due(self) -> None:
         if self._clock() >= self._next_report:
-            self.report(extra_dropped)
+            self.report()
 
-    def report(self, extra_dropped: int = 0) -> None:
+    def report(self) -> None:
         """Imprime lo ocurrido desde el reporte anterior."""
-        current = self.snapshot(extra_dropped)
+        current = self.snapshot()
         sent, dropped, reconnects = current['sent'], current['dropped'], current['reconnects']
         previous = self._reported
 

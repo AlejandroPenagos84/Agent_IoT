@@ -1,0 +1,25 @@
+# Mosquitto de prueba que hace de "broker del cliente", en la red de la central.
+#
+#   docker compose -f docker-compose.mosquitto.yml up -d
+#
+# Está en agent_iot_default para que la captura (que comparte su red) resuelva
+# app:8000 y app:8443. La captura solo procesa tramas 1883/8883, así que su
+# propio tráfico hacia el agente no se mezcla con el MQTT.
+name: mosquitto-cliente
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mosquitto-cliente
+    # Config incluida en la imagen: listener 1883, sin autenticación.
+    command: ["mosquitto", "-c", "/mosquitto-no-auth.conf"]
+    ports:
+      - "127.0.0.1:1884:1883"   # para publicar desde tu máquina
+    networks:
+      - central
+    restart: unless-stopped
+
+networks:
+  central:
+    name: agent_iot_default
+    external: true

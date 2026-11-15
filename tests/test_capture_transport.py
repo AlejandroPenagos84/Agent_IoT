@@ -52,15 +52,29 @@ class TokenAuthTests(unittest.TestCase):
 
 
 class DropOldestQueueTests(unittest.TestCase):
-    def test_full_queue_drops_oldest_and_counts(self):
-        queue = DropOldestQueue(2)
+    def test_full_queue_drops_oldest_and_reports_it(self):
+        drops = []
+        queue = DropOldestQueue(2, on_drop=drops.append)
 
-        for item in ('a', 'b', 'c'):
+        for item in ('a', 'b', 'c', 'd'):
             queue.put(item)
 
-        self.assertEqual(queue.dropped, 1)
-        self.assertEqual(queue.take(10), ['b', 'c'])
+        self.assertEqual(drops, [1, 1])
+        self.assertEqual(queue.take(10), ['c', 'd'])
         self.assertFalse(queue.wait(0.01))
+
+    def test_size_must_be_positive(self):
+        for size in (0, -1):
+            with self.assertRaises(ValueError):
+                DropOldestQueue(size)
+
+    def test_sender_counts_queue_drops_in_stats(self):
+        from capture.infrastructure.transport import SocketSender
+
+        sender = SocketSender.from_endpoint('unix:///nonexistent.sock', queue_size=1)
+        sender.send('a')
+        sender.send('b')
+        self.assertEqual(sender.stats['dropped'], 1)
 
 
 class SenderStatsTests(unittest.TestCase):
@@ -71,10 +85,9 @@ class SenderStatsTests(unittest.TestCase):
         stats.on_connected()
         stats.on_sent(3)
         stats.on_dropped(1)
+        stats.on_dropped(2)
 
-        self.assertEqual(
-            stats.snapshot(extra_dropped=2), {'sent': 3, 'dropped': 3, 'reconnects': 1}
-        )
+        self.assertEqual(stats.snapshot(), {'sent': 3, 'dropped': 3, 'reconnects': 1})
 
     def test_report_prints_only_the_delta(self):
         sink = io.StringIO()
