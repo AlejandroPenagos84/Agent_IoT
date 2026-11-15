@@ -5,7 +5,6 @@
 target-version = "py311"   # versión de las imágenes Docker
 line-length = 100
 src = ["src", "tests"]
-extend-exclude = ["ML_Model"]   # notebooks de entrenamiento, se dejan como están
 
 [tool.ruff.format]
 quote-style = "single"     # la convención que ya usa el código
