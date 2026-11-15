@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import math
 import sqlite3
 import threading
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -58,6 +60,8 @@ MIGRATIONS = (
     ('brokers', 'enrollment_key_hash', 'TEXT'),
     ('sensors', 'secret_hash', 'TEXT'),
     ('sensors', 'last_seen', 'TEXT'),
+    # Epoch (segundos enteros): los tokens de sensor emitidos antes no valen.
+    ('sensors', 'tokens_valid_after', 'REAL'),
 )
 MIGRATION_INDEXES = """
 CREATE UNIQUE INDEX IF NOT EXISTS ux_brokers_enrollment
@@ -72,6 +76,12 @@ class SensorExistsError(ValueError):
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _revocation_stamp() -> float:
+    """Segundo actual truncado: el ``iat`` del JWT también va en segundos enteros,
+    así un token emitido justo después de revocar sigue siendo válido."""
+    return float(math.floor(time.time()))
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -140,7 +150,9 @@ class RegistryStore:
             )
             if cursor.rowcount:
                 self.connection.execute(
-                    'UPDATE sensors SET secret_hash = NULL WHERE broker_id = ?', (broker_id,)
+                    'UPDATE sensors SET secret_hash = NULL, tokens_valid_after = ? '
+                    'WHERE broker_id = ?',
+                    (_revocation_stamp(), broker_id),
                 )
             self.connection.commit()
         return cursor.rowcount > 0
@@ -177,10 +189,19 @@ class RegistryStore:
                     sensor,
                 )
             else:
-                sensor = {**dict(row), 'name': name, 'secret_hash': secret_hash, 'last_seen': now}
+                # Reinstalación: los tokens de la instalación anterior dejan de valer.
+                valid_after = _revocation_stamp()
+                sensor = {
+                    **dict(row),
+                    'name': name,
+                    'secret_hash': secret_hash,
+                    'last_seen': now,
+                    'tokens_valid_after': valid_after,
+                }
                 self.connection.execute(
-                    'UPDATE sensors SET name = ?, secret_hash = ?, last_seen = ? WHERE id = ?',
-                    (name, secret_hash, now, sensor['id']),
+                    'UPDATE sensors SET name = ?, secret_hash = ?, last_seen = ?, '
+                    'tokens_valid_after = ? WHERE id = ?',
+                    (name, secret_hash, now, valid_after, sensor['id']),
                 )
             self.connection.commit()
         return sensor
@@ -190,6 +211,23 @@ class RegistryStore:
             'SELECT * FROM sensors WHERE secret_hash = ?', (secret_hash,)
         ).fetchone()
         return dict(row) if row else None
+
+    def sensor_token_active(
+        self, tenant_id: str, broker_id: str, sensor_id: str, issued_at: float | None
+    ) -> bool:
+        """¿Sigue valiendo un token de sensor? El sensor debe existir con esos ids
+        y el token no puede ser anterior a la última revocación."""
+        row = self.connection.execute(
+            'SELECT tokens_valid_after FROM sensors WHERE id = ? AND tenant_id = ? '
+            'AND broker_id = ?',
+            (sensor_id, tenant_id, broker_id),
+        ).fetchone()
+        if row is None:
+            return False
+        valid_after = row['tokens_valid_after']
+        if valid_after is None:
+            return True
+        return issued_at is not None and issued_at >= valid_after
 
     def touch_sensor(self, sensor_id: str) -> None:
         with self._lock:

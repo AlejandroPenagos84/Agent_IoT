@@ -6,13 +6,18 @@ import asyncio
 import ssl
 import threading
 
-from .connection_limiter import ConnectionLimiter
+from wire.protocol import IDLE_TIMEOUT_SECONDS
+
+from .connection_limiter import ConnectionLimiter, SensorSlots
 from .listener import Listener, listener_for
-from .sensor_auth import HELLO_TIMEOUT, SensorAuth, TokenValidator
-from .sensor_connection import Route, SensorConnection, close_writer
+from .sensor_auth import HELLO_TIMEOUT, ActiveCheck, SensorAuth, TokenValidator
+from .sensor_connection import RECHECK_SECONDS, Route, SensorConnection, close_writer
 
 READ_LIMIT = 64 * 1024
 MAX_CONNECTIONS = 10_000
+# Una captura usa una conexión; el margen cubre reconexiones mientras el agente
+# todavía no detecta que la anterior murió.
+MAX_CONNECTIONS_PER_SENSOR = 4
 START_TIMEOUT = 5.0
 MIN_BACKLOG = 100
 MAX_BACKLOG = 65535
@@ -26,7 +31,9 @@ class AsyncSocketServer:
 
     - ``Listener`` abre el socket Unix o TLS (``listener_for``).
     - ``ConnectionLimiter`` aplica el tope de conexiones y las cancela al cerrar.
-    - ``SensorAuth`` hace el handshake ``hello``/``hello_ack`` con el token.
+    - ``SensorSlots`` aplica el tope de conexiones por sensor.
+    - ``SensorAuth`` hace el handshake ``hello``/``hello_ack`` con el token y,
+      con ``sensor_active``, comprueba que el sensor siga vigente en el registro.
     - ``SensorConnection`` atiende cada conexión: lectura, identidad y ``route``.
     """
 
@@ -39,14 +46,24 @@ class AsyncSocketServer:
         token_validator: TokenValidator | None = None,
         require_token: bool = False,
         hello_timeout: float = HELLO_TIMEOUT,
+        sensor_active: ActiveCheck | None = None,
+        max_connections_per_sensor: int = MAX_CONNECTIONS_PER_SENSOR,
+        idle_timeout: float | None = IDLE_TIMEOUT_SECONDS,
+        recheck_seconds: float = RECHECK_SECONDS,
     ) -> None:
         self.endpoint = endpoint
         self.max_line_bytes = max_line_bytes
         self._listener: Listener = listener_for(endpoint, ssl_context)
         self._limiter = ConnectionLimiter(max_connections)
+        self._slots = SensorSlots(max_connections_per_sensor)
         self._auth = SensorAuth(
-            token_validator, require_token=require_token, hello_timeout=hello_timeout
+            token_validator,
+            require_token=require_token,
+            hello_timeout=hello_timeout,
+            is_active=sensor_active,
         )
+        self._idle_timeout = idle_timeout
+        self._recheck_seconds = recheck_seconds
 
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -64,6 +81,11 @@ class AsyncSocketServer:
     def rejected(self) -> int:
         """Conexiones rechazadas por superar ``max_connections``."""
         return self._limiter.rejected
+
+    @property
+    def rejected_per_sensor(self) -> int:
+        """Conexiones rechazadas por superar el tope de un mismo sensor."""
+        return self._slots.rejected
 
     def start(self, route: Route) -> None:
         """Arranca el event loop y bloquea hasta que el socket está escuchando."""
@@ -142,6 +164,9 @@ class AsyncSocketServer:
                 route=route,
                 max_line_bytes=self.max_line_bytes,
                 should_stop=self._stopping,
+                sensor_slots=self._slots,
+                idle_timeout=self._idle_timeout,
+                recheck_seconds=self._recheck_seconds,
             ).serve()
         finally:
             self._limiter.release(task)

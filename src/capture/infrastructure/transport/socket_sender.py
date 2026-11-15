@@ -13,6 +13,7 @@ from capture.infrastructure.transport.connector import Connector, connector_for
 from capture.infrastructure.transport.drop_oldest_queue import DropOldestQueue
 from capture.infrastructure.transport.sender_stats import SenderStats
 from capture.infrastructure.transport.token_auth import TokenAuth
+from wire.protocol import KEEPALIVE_SECONDS, PING_FRAME
 
 DEFAULT_ENDPOINT = 'unix:///capture/features.sock'
 DEFAULT_QUEUE_SIZE = 50_000
@@ -43,6 +44,7 @@ class SocketSender(RecordSender):
         *,
         retry_seconds: float = 1.0,
         connect_timeout: float = 10.0,
+        keepalive_seconds: float = KEEPALIVE_SECONDS,
     ):
         self._connector = connector
         self._auth = auth
@@ -50,6 +52,10 @@ class SocketSender(RecordSender):
         self._stats = stats
         self._retry_seconds = max(retry_seconds, MIN_WAIT_SECONDS)
         self._connect_timeout = max(connect_timeout, MIN_WAIT_SECONDS)
+        # Sin tráfico MQTT no hay registros: el ping evita que el agente cierre
+        # la conexión por inactividad.
+        self._keepalive = max(keepalive_seconds, MIN_WAIT_SECONDS)
+        self._last_write = 0.0
 
         self._stop = threading.Event()
         self._closing = False
@@ -157,6 +163,10 @@ class SocketSender(RecordSender):
                     _close(sock)
                     sock = None
                     continue
+            elif not self._ping_if_idle(sock):
+                _close(sock)
+                sock = None
+                continue
 
             self._stats.report_if_due()
 
@@ -183,6 +193,7 @@ class SocketSender(RecordSender):
             return None
 
         self._stats.on_connected()
+        self._last_write = time.monotonic()
         return sock
 
     def _ship(self, sock: socket.socket, batch: list[str]) -> bool:
@@ -199,6 +210,18 @@ class SocketSender(RecordSender):
             return False
 
         self._stats.on_sent(len(batch))
+        self._last_write = time.monotonic()
+        return True
+
+    def _ping_if_idle(self, sock: socket.socket) -> bool:
+        """Manda ``ping`` si pasó ``keepalive`` sin escribir; ``False`` si falló."""
+        if time.monotonic() - self._last_write < self._keepalive:
+            return True
+        try:
+            sock.sendall(PING_FRAME)
+        except SEND_ERRORS:
+            return False
+        self._last_write = time.monotonic()
         return True
 
     def _keep_running(self) -> bool:

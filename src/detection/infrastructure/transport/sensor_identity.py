@@ -14,13 +14,14 @@ class SensorIdentity:
     sensor_id: str
     # Vencimiento del token (epoch); ``None`` si no trae ``exp``.
     expires_at: float | None = None
+    # Emisión del token (epoch); sirve para invalidar tokens viejos al revocar.
+    issued_at: float | None = None
 
     @classmethod
     def from_claims(cls, claims: dict) -> SensorIdentity:
         """Lanza ``KeyError``/``TypeError`` si faltan los ids."""
         ids = {key: str(claims[key]) for key in IDENTITY_KEYS}
-        expires = claims.get('exp')
-        return cls(**ids, expires_at=float(expires) if isinstance(expires, (int, float)) else None)
+        return cls(**ids, expires_at=_epoch(claims.get('exp')), issued_at=_epoch(claims.get('iat')))
 
     def bind(self, record: dict) -> bool:
         """Rellena los ids del registro con los del token.
@@ -40,3 +41,7 @@ class SensorIdentity:
         if self.expires_at is None:
             return None
         return self.expires_at - now
+
+
+def _epoch(value: object) -> float | None:
+    return float(value) if isinstance(value, (int, float)) else None

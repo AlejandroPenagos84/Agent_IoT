@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import os
 import ssl
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from detection.application import Agent, BrokerPool, DetectionServer
 from detection.application.use_cases.ingest_alert import IngestAlert
 from detection.infrastructure.classifiers import TcpXgbClassifier
+from detection.infrastructure.repositories.registry_sqlite import RegistryStore
 from detection.infrastructure.sensor_tokens import SensorTokenService
 from detection.infrastructure.sinks import (
     CompositeAlertSink,
@@ -20,6 +21,7 @@ from detection.infrastructure.transport import (
     CertificateReloader,
     server_ssl_context,
 )
+from detection.infrastructure.transport.sensor_identity import SensorIdentity
 
 BINARY_LABELS = {'normal', 'ataque'}
 
@@ -83,13 +85,17 @@ def _server_ssl_context(cfg: AgentConfig) -> ssl.SSLContext | None:
 
 
 def build_agent(
-    cfg: AgentConfig, ingest: IngestAlert, sensor_tokens: SensorTokenService | None = None
+    cfg: AgentConfig,
+    ingest: IngestAlert,
+    sensor_tokens: SensorTokenService | None = None,
+    registry: RegistryStore | None = None,
 ) -> DetectionServer:
     """Build the transport, the per-broker pool and its shared sinks.
 
     ``ingest`` is the same use case the API uses, so alerts go straight to the
     database and the daily journal, in-process. ``sensor_tokens`` validates the
-    hello frame on ``tls://`` endpoints.
+    hello frame on ``tls://`` endpoints; with ``registry`` the agent also rejects
+    (and later disconnects) sensors that were deleted or revoked.
     """
     probe = TcpXgbClassifier(model_dir=cfg.model_dir)
     class_names = set(getattr(probe, 'cfg', {}).get('class_names', []))
@@ -153,5 +159,15 @@ def build_agent(
         ssl_context=ssl_context,
         token_validator=validator,
         require_token=require_token,
+        sensor_active=_sensor_active(registry) if require_token and registry else None,
     )
     return DetectionServer(server, pool, closeables=tuple(closeables))
+
+
+def _sensor_active(registry: RegistryStore) -> Callable[[SensorIdentity], bool]:
+    def check(identity: SensorIdentity) -> bool:
+        return registry.sensor_token_active(
+            identity.tenant_id, identity.broker_id, identity.sensor_id, identity.issued_at
+        )
+
+    return check

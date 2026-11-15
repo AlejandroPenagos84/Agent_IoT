@@ -45,6 +45,15 @@ def hello_frame(token: str) -> bytes:
 
 HELLO_ACK_FRAME = (json.dumps({'type': HELLO_ACK}, separators=(',', ':')) + '\n').encode('utf-8')
 
+# ------------------------------------------------------------- keepalive
+# La captura manda ``ping`` si lleva ``KEEPALIVE_SECONDS`` sin enviar nada; el
+# agente cierra las conexiones que pasan ``IDLE_TIMEOUT_SECONDS`` en silencio.
+# El ping no trae ``tcp_features``, así que el agente lo descarta como registro.
+PING = 'ping'
+PING_FRAME = (json.dumps({'type': PING}, separators=(',', ':')) + '\n').encode('utf-8')
+KEEPALIVE_SECONDS = 30.0
+IDLE_TIMEOUT_SECONDS = 120.0
+
 
 def message_type(line: bytes) -> tuple[str | None, dict | None]:
     """Decode one control line; ``(None, None)`` when it is not a JSON object."""

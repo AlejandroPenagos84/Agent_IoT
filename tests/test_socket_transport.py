@@ -349,6 +349,68 @@ class TlsSocketTests(unittest.TestCase):
             finally:
                 server.stop()
 
+    def _send_one(self, server, ca, token='good'):
+        client = ssl.create_default_context(cafile=str(ca))
+        sender = SocketSender.from_endpoint(
+            f'tls://127.0.0.1:{server.port}',
+            tls_context=client,
+            server_name='localhost',
+            sensor_token=token,
+            retry_seconds=0.05,
+        )
+        sender.start()
+        sender.send(json.dumps(feature_record(0)) + '\n')
+        return sender
+
+    def test_tls_rejects_revoked_sensor_even_with_valid_token(self):
+        collector = Collector()
+        checked = []
+
+        def revoked(identity):
+            checked.append(identity.sensor_id)
+            return False
+
+        with tempfile.TemporaryDirectory(prefix='iot-tls-revoked-') as directory:
+            server, ca = self._start_tls_server(
+                directory,
+                collector,
+                token_validator=tls_validator,
+                require_token=True,
+                sensor_active=revoked,
+            )
+            try:
+                sender = self._send_one(server, ca)
+                time.sleep(0.5)
+                self.assertEqual(collector.snapshot(), [])
+                self.assertIn('s1', checked)
+                sender.close(0.2)
+            finally:
+                server.stop()
+
+    def test_tls_disconnects_sensor_revoked_while_connected(self):
+        collector = Collector(target=1)
+        state = {'active': True}
+        with tempfile.TemporaryDirectory(prefix='iot-tls-revoke-live-') as directory:
+            server, ca = self._start_tls_server(
+                directory,
+                collector,
+                token_validator=tls_validator,
+                require_token=True,
+                sensor_active=lambda identity: state['active'],
+                recheck_seconds=0.1,
+            )
+            try:
+                sender = self._send_one(server, ca)
+                self.assertTrue(collector.done.wait(5))
+                state['active'] = False
+                time.sleep(0.4)  # el agente revisa el registro y corta
+                sender.send(json.dumps(feature_record(1)) + '\n')
+                time.sleep(0.5)
+                self.assertEqual(len(collector.snapshot()), 1)
+                sender.close(0.2)
+            finally:
+                server.stop()
+
     def test_tls_rejects_identity_spoofing(self):
         collector = Collector()
         with tempfile.TemporaryDirectory(prefix='iot-tls-spoof-') as directory:

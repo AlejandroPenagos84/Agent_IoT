@@ -33,3 +33,34 @@ class ConnectionLimiter:
 
     def __len__(self) -> int:
         return len(self._tasks)
+
+
+class SensorSlots:
+    """Tope de conexiones simultáneas por sensor autenticado.
+
+    Evita que un solo token acapare el cupo global. Solo se usa desde el event
+    loop: no necesita locks.
+    """
+
+    def __init__(self, per_sensor: int):
+        self.per_sensor = per_sensor
+        self.rejected = 0
+        self._open: dict[str, int] = {}
+
+    def acquire(self, sensor_id: str) -> bool:
+        count = self._open.get(sensor_id, 0)
+        if count >= self.per_sensor:
+            self.rejected += 1
+            return False
+        self._open[sensor_id] = count + 1
+        return True
+
+    def release(self, sensor_id: str) -> None:
+        count = self._open.get(sensor_id, 0) - 1
+        if count > 0:
+            self._open[sensor_id] = count
+        else:
+            self._open.pop(sensor_id, None)
+
+    def count(self, sensor_id: str) -> int:
+        return self._open.get(sensor_id, 0)

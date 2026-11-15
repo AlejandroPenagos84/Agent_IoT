@@ -77,7 +77,7 @@ def build_modules(
     if agent_config is not None:
         cfg = agent_config
         agent = AgentRunner(
-            lambda: build_agent(cfg, detection.ingest, detection.sensor_tokens),
+            lambda: build_agent(cfg, detection.ingest, detection.sensor_tokens, detection.store),
             wait_for=(cfg.tls_cert, cfg.tls_key)
             if cfg.capture_endpoint.startswith('tls://')
             else (),
