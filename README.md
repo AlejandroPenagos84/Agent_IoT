@@ -13,6 +13,8 @@ captured traffic. The multi-attack version of the project lives in
 
 ## Architecture
 
+Full architecture reference (in Spanish, with diagrams): [`docs/arquitectura.md`](docs/arquitectura.md).
+
 The project is a modular monolith. All application code lives under `src/`.
 `detection` and `auth` do not import each other (only through `auth.api`), and
 `capture` ships alone in the customer image, so it only uses `wire` and the
