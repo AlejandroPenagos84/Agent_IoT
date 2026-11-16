@@ -119,7 +119,7 @@ describe('authentication screens', () => {
     const user = userEvent.setup()
     vi.mocked(authApi.login).mockResolvedValue({ access_token: 'access-token', token_type: 'bearer', expires_in: 900 })
     vi.mocked(authApi.getMe).mockResolvedValue({ id: 'u1', username: 'ana', email: 'ana@example.com', status: 'active', created_at: '2026-01-01' })
-    vi.mocked(authApi.getAnalyticalReport).mockResolvedValue({ total_alerts: 2 })
+    vi.mocked(authApi.getAnalyticalReport).mockResolvedValue({ general: { total_alerts: 2 } })
     vi.mocked(authApi.generateNaturalReport).mockResolvedValue({ report: 'Se detectaron dos alertas.' })
     render(<App />)
     await user.type(screen.getByLabelText('Correo electrónico'), 'ana@example.com')
@@ -129,7 +129,8 @@ describe('authentication screens', () => {
 
     expect(screen.getByRole('heading', { name: 'Reportes' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /Ver reporte JSON/ }))
-    expect(await screen.findByLabelText('Reporte JSON')).toHaveTextContent('"total_alerts": 2')
+    expect(await screen.findByLabelText('Resumen del reporte')).toHaveTextContent('Alertas')
+    expect(screen.getByText('2', { selector: 'strong' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /Generar resumen/ }))
     expect(await screen.findByText('Se detectaron dos alertas.')).toBeInTheDocument()
   })

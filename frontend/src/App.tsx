@@ -20,6 +20,70 @@ import {
 
 type View = 'login' | 'register' | 'verify' | 'home'
 type HomeSection = 'brokers' | 'reports'
+type ReportData = Record<string, unknown>
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function numberValue(value: unknown): number {
+  return typeof value === 'number' ? value : 0
+}
+
+function formatReportDate(value: unknown): string {
+  if (typeof value !== 'string') return 'Sin fecha'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+function ReportMetric({ label, value }: { label: string; value: string | number }) {
+  return <div className="report-metric"><span>{label}</span><strong>{value}</strong></div>
+}
+
+function ReportDetails({ report }: { report: ReportData }) {
+  const general = recordValue(report.general)
+  const period = recordValue(report.period)
+  const alertTypes = recordValue(general.alert_types)
+  const topClients = recordValue(report.clients).top_10
+  const topIps = recordValue(report.ips).top_10
+  const topTopics = recordValue(report.topics).top_10
+  const entities = [
+    ...(Array.isArray(topClients) ? topClients.slice(0, 3).map((item) => ({ label: 'Cliente', value: recordValue(item).client_id })) : []),
+    ...(Array.isArray(topIps) ? topIps.slice(0, 3).map((item) => ({ label: 'IP', value: recordValue(item).ip })) : []),
+    ...(Array.isArray(topTopics) ? topTopics.slice(0, 3).map((item) => ({ label: 'Topic', value: recordValue(item).topic })) : []),
+  ]
+
+  return (
+    <div className="report-details" aria-label="Resumen del reporte">
+      <div className="report-metrics">
+        <ReportMetric label="Alertas" value={numberValue(general.total_alerts)} />
+        <ReportMetric label="Clientes" value={numberValue(general.clients_with_alerts)} />
+        <ReportMetric label="IPs distintas" value={numberValue(general.distinct_ips)} />
+        <ReportMetric label="Topics" value={numberValue(general.distinct_topics)} />
+      </div>
+      <div className="report-period">
+        <span>Periodo analizado</span>
+        <strong>{formatReportDate(period.start)} – {formatReportDate(period.end)}</strong>
+      </div>
+      {Object.keys(alertTypes).length > 0 && (
+        <div className="report-subsection">
+          <h4>Tipos de alerta</h4>
+          <div className="report-chips">{Object.entries(alertTypes).map(([label, count]) => <span key={label}>{label} <strong>{String(count)}</strong></span>)}</div>
+        </div>
+      )}
+      {entities.length > 0 && (
+        <div className="report-subsection">
+          <h4>Entidades con más actividad</h4>
+          <ul className="report-entities">{entities.map((entity, index) => <li key={`${entity.label}-${String(entity.value)}-${index}`}><span>{entity.label}</span><strong>{String(entity.value ?? 'Sin identificar')}</strong></li>)}</ul>
+        </div>
+      )}
+      <details className="report-raw">
+        <summary>Ver detalle técnico</summary>
+        <pre>{JSON.stringify(report, null, 2)}</pre>
+      </details>
+    </div>
+  )
+}
 
 function Logo() {
   return (
@@ -268,7 +332,7 @@ function ReportPanel({ token }: { token: string }) {
           <button className="primary-button" onClick={() => void handleAnalytics()} disabled={loadingAnalytics}>
             {loadingAnalytics ? 'Consultando…' : <>Ver reporte JSON <ArrowIcon /></>}
           </button>
-          {analytics && <pre className="json-result" aria-label="Reporte JSON">{JSON.stringify(analytics, null, 2)}</pre>}
+          {analytics && <ReportDetails report={analytics} />}
           {!analytics && !loadingAnalytics && <p className="empty-state">Aún no has consultado un reporte.</p>}
         </article>
         <article className="report-card">
