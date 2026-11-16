@@ -97,7 +97,7 @@ describe('authentication screens', () => {
     await user.type(screen.getByLabelText('Contraseña'), 'secreto123')
     await user.click(screen.getByRole('button', { name: /Entrar/ }))
 
-    expect(await screen.findByRole('heading', { name: 'Hola, ana.' })).toBeInTheDocument()
+    expect(await screen.findByText('ana', { selector: '.session-user' })).toBeInTheDocument()
     expect(authApi.getMe).toHaveBeenCalledWith('access-token')
   })
 
@@ -125,7 +125,7 @@ describe('authentication screens', () => {
     await user.type(screen.getByLabelText('Correo electrónico'), 'ana@example.com')
     await user.type(screen.getByLabelText('Contraseña'), 'secreto123')
     await user.click(screen.getByRole('button', { name: /Entrar/ }))
-    await user.click(await screen.findByRole('button', { name: 'Reportes' }))
+    await user.click(await screen.findByRole('tab', { name: 'Reportes' }))
 
     expect(screen.getByRole('heading', { name: 'Reportes' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /Ver reporte JSON/ }))

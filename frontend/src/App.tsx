@@ -423,18 +423,25 @@ function App() {
   if (view === 'home' && user) {
     return (
       <main className="home-layout">
-        <header className="topbar"><Logo /><button className="quiet-button" onClick={handleLogout}>Cerrar sesión</button></header>
-        <section className="welcome-card welcome-intro">
-          <p className="eyebrow">Sesión activa</p>
-          <h1>Hola, {user.username}.</h1>
-          <p>Tu espacio de monitoreo está listo para comenzar.</p>
-          <div className="token-note"><span className="status-dot" /> Conexión segura establecida</div>
-        </section>
-        <nav className="home-tabs" aria-label="Secciones principales">
-          <button className={homeSection === 'brokers' ? 'home-tab active' : 'home-tab'} aria-selected={homeSection === 'brokers'} onClick={() => setHomeSection('brokers')}>Brokers MQTT</button>
-          <button className={homeSection === 'reports' ? 'home-tab active' : 'home-tab'} aria-selected={homeSection === 'reports'} onClick={() => setHomeSection('reports')}>Reportes</button>
+        <header className="topbar">
+          <Logo />
+          <div className="session-summary" aria-label={`Sesión activa de ${user.username}`}>
+            <span className="session-status"><span className="status-dot" /> Sesión activa</span>
+            <span className="session-user">{user.username}</span>
+            <span className="session-secure">Conexión segura</span>
+          </div>
+          <button className="quiet-button" onClick={handleLogout}>Cerrar sesión</button>
+        </header>
+        <nav className="home-tabs" aria-label="Secciones principales" role="tablist">
+          <button className={homeSection === 'brokers' ? 'home-tab active' : 'home-tab'} role="tab" aria-selected={homeSection === 'brokers'} onClick={() => setHomeSection('brokers')}>Brokers MQTT</button>
+          <button className={homeSection === 'reports' ? 'home-tab active' : 'home-tab'} role="tab" aria-selected={homeSection === 'reports'} onClick={() => setHomeSection('reports')}>Reportes</button>
         </nav>
-        {homeSection === 'brokers' ? <BrokerPanel token={token} /> : <ReportPanel token={token} />}
+        <div hidden={homeSection !== 'brokers'}>
+          <BrokerPanel token={token} />
+        </div>
+        <div hidden={homeSection !== 'reports'}>
+          <ReportPanel token={token} />
+        </div>
       </main>
     )
   }
