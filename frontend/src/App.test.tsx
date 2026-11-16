@@ -15,6 +15,10 @@ vi.mock('./api', async () => {
     verifyEmail: vi.fn(),
     resendVerification: vi.fn(),
     logout: vi.fn(),
+    listBrokers: vi.fn(),
+    createBroker: vi.fn(),
+    deleteBroker: vi.fn(),
+    rotateBrokerKey: vi.fn(),
   }
 })
 
@@ -31,6 +35,10 @@ describe('authentication screens', () => {
     vi.mocked(authApi.verifyEmail).mockReset()
     vi.mocked(authApi.resendVerification).mockReset()
     vi.mocked(authApi.logout).mockReset()
+    vi.mocked(authApi.listBrokers).mockResolvedValue([])
+    vi.mocked(authApi.createBroker).mockReset()
+    vi.mocked(authApi.deleteBroker).mockReset()
+    vi.mocked(authApi.rotateBrokerKey).mockReset()
   })
 
   it('shows the login form and navigates to registration', async () => {

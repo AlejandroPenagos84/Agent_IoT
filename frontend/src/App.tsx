@@ -2,11 +2,16 @@ import { FormEvent, useEffect, useState } from 'react'
 import {
   getApiError,
   getMe,
+  Broker,
+  createBroker,
+  deleteBroker,
+  listBrokers,
   login,
   logout,
   refresh,
   register,
   resendVerification,
+  rotateBrokerKey,
   User,
   verifyEmail,
 } from './api'
@@ -120,6 +125,86 @@ function AuthShell({
   )
 }
 
+function BrokerPanel({ token }: { token: string }) {
+  const [brokers, setBrokers] = useState<Broker[]>([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [notice, setNotice] = useState<{ kind: 'error' | 'success' | 'info'; text: string } | null>(null)
+  const [command, setCommand] = useState<{ key: string; text: string } | null>(null)
+
+  async function loadBrokers() {
+    setLoading(true)
+    try { setBrokers(await listBrokers(token)) }
+    catch (error) { setNotice({ kind: 'error', text: getApiError(error, 'No pudimos cargar tus brokers.') }) }
+    finally { setLoading(false) }
+  }
+  useEffect(() => { void loadBrokers() }, [token])
+
+  async function handleCreate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const formElement = event.currentTarget
+    const form = new FormData(formElement)
+    setSaving(true); setNotice(null)
+    try {
+      const broker = await createBroker(token, {
+        name: String(form.get('name')),
+        host: String(form.get('host') || '') || undefined,
+        port: form.get('port') ? Number(form.get('port')) : undefined,
+      })
+      setCommand({ key: broker.enrollment_key, text: broker.install_command })
+      formElement.reset(); await loadBrokers()
+      setNotice({ kind: 'success', text: 'Broker creado. Guarda el comando antes de cerrar este aviso.' })
+    } catch (error) { setNotice({ kind: 'error', text: getApiError(error, 'No pudimos crear el broker.') }) }
+    finally { setSaving(false) }
+  }
+  async function handleDelete(broker: Broker) {
+    if (!window.confirm(`¿Eliminar el broker "${broker.name}"?`)) return
+    setSaving(true); setNotice(null)
+    try { await deleteBroker(token, broker.id); await loadBrokers(); setNotice({ kind: 'success', text: 'Broker eliminado.' }) }
+    catch (error) { setNotice({ kind: 'error', text: getApiError(error, 'No pudimos eliminar el broker.') }) }
+    finally { setSaving(false) }
+  }
+  async function handleRotate(broker: Broker) {
+    setSaving(true); setNotice(null)
+    try {
+      const result = await rotateBrokerKey(token, broker.id)
+      setCommand({ key: result.enrollment_key, text: result.install_command })
+      setNotice({ kind: 'success', text: 'Clave renovada. La clave anterior dejó de funcionar.' })
+    } catch (error) { setNotice({ kind: 'error', text: getApiError(error, 'No pudimos renovar la clave.') }) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <section className="broker-section" aria-labelledby="brokers-heading">
+      <div className="section-heading"><p className="eyebrow">Infraestructura</p><h2 id="brokers-heading">Brokers MQTT</h2><p>Conecta y administra los brokers que alimentan tu monitoreo.</p></div>
+      {notice && <Message kind={notice.kind}>{notice.text}</Message>}
+      {command && <div className="command-card" role="status">
+        <strong>Comando de instalación</strong><p>Esta información se muestra una sola vez. Cópiala y guárdala en un lugar seguro.</p>
+        <label className="command-field">Clave de enrolamiento<input readOnly value={command.key} onFocus={(event) => event.currentTarget.select()} /></label>
+        <label className="command-field">Comando para tu servidor<textarea readOnly value={command.text} onFocus={(event) => event.currentTarget.select()} rows={4} /></label>
+        <button className="secondary-button" onClick={() => setCommand(null)}>Entendido</button>
+      </div>}
+      <div className="broker-grid">
+        <form className="broker-card broker-form" onSubmit={handleCreate}>
+          <h3>Nuevo broker</h3><p>Registra el servidor MQTT que quieres monitorear.</p>
+          <Field label="Nombre" id="name" placeholder="Broker de producción" />
+          <Field label="Host (opcional)" id="host" placeholder="mqtt.ejemplo.com" />
+          <Field label="Puerto (opcional)" id="port" type="number" placeholder="1883" />
+          <button className="primary-button" disabled={saving}>{saving ? 'Guardando…' : <>Crear broker <ArrowIcon /></>}</button>
+        </form>
+        <div className="broker-card"><div className="card-title"><h3>Tus brokers</h3><span>{brokers.length}</span></div>
+          {loading ? <p className="empty-state">Cargando brokers…</p> : brokers.length === 0 ? <p className="empty-state">Aún no tienes brokers registrados.</p> : <ul className="broker-list">
+            {brokers.map((broker) => <li key={broker.id} className="broker-item">
+              <div><strong>{broker.name}</strong><span>{broker.host || 'Host no definido'}{broker.port ? `:${broker.port}` : ''}</span></div>
+              <div className="broker-actions"><span className={`broker-status broker-status-${broker.status}`}>{broker.status === 'connected' ? 'Conectado' : broker.status === 'offline' ? 'Sin conexión' : 'Pendiente'}</span><button className="link-button" disabled={saving} onClick={() => void handleRotate(broker)}>Renovar clave</button><button className="delete-button" disabled={saving} onClick={() => void handleDelete(broker)}>Eliminar</button></div>
+            </li>)}
+          </ul>}
+        </div>
+      </div>
+    </section>
+  )
+}
+
 function App() {
   const [view, setView] = useState<View>('login')
   const [user, setUser] = useState<User | null>(null)
@@ -196,12 +281,13 @@ function App() {
     return (
       <main className="home-layout">
         <header className="topbar"><Logo /><button className="quiet-button" onClick={handleLogout}>Cerrar sesión</button></header>
-        <section className="welcome-card">
+        <section className="welcome-card welcome-intro">
           <p className="eyebrow">Sesión activa</p>
           <h1>Hola, {user.username}.</h1>
           <p>Tu espacio de monitoreo está listo para comenzar.</p>
           <div className="token-note"><span className="status-dot" /> Conexión segura establecida</div>
         </section>
+        <BrokerPanel token={token} />
       </main>
     )
   }
