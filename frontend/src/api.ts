@@ -9,6 +9,8 @@ export type Broker = {
   sensor_id: string | null; last_seen: string | null
 }
 export type BrokerCreated = Broker & { enrollment_key: string; install_command: string }
+export type AnalyticalReport = Record<string, unknown>
+export type NaturalReport = { report: string }
 
 type ApiErrorBody = { error?: { code?: string; message?: string } }
 
@@ -57,4 +59,19 @@ export async function rotateBrokerKey(token: string, brokerId: string) {
   const { data } = await api.post<{ enrollment_key: string; install_command: string }>(
     `/brokers/${brokerId}/enrollment-key`, undefined, authHeaders(token),
   ); return data
+}
+export async function getAnalyticalReport(token: string, brokerId?: string) {
+  const { data } = await api.get<AnalyticalReport>('/reports/analytics', {
+    ...authHeaders(token),
+    params: brokerId ? { broker_id: brokerId } : undefined,
+  })
+  return data
+}
+export async function generateNaturalReport(token: string, brokerId?: string) {
+  const { data } = await api.post<NaturalReport>(
+    '/reports',
+    brokerId ? { broker_id: brokerId } : {},
+    authHeaders(token),
+  )
+  return data
 }

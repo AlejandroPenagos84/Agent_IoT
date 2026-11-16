@@ -74,6 +74,15 @@ La sección utiliza estos endpoints autenticados:
 - `POST /api/v1/brokers/{broker_id}/enrollment-key`: renovar la clave.
 - `DELETE /api/v1/brokers/{broker_id}`: eliminar un broker.
 
+## Reportes
+
+La pestaña **Reportes** del inicio permite elegir un broker o consultar todos los datos del tenant. Incluye:
+
+- **Datos del reporte:** consulta el resumen estructurado mediante `GET /api/v1/reports/analytics`.
+- **Resumen en lenguaje natural:** genera una explicación mediante `POST /api/v1/reports`.
+
+Ambas acciones muestran estados de carga, errores del backend y el resultado dentro de la pantalla.
+
 Si la API está publicada en otra dirección, configura la URL antes de iniciar Vite:
 
 ```bash

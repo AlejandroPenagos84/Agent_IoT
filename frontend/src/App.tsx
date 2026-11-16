@@ -5,6 +5,8 @@ import {
   Broker,
   createBroker,
   deleteBroker,
+  generateNaturalReport,
+  getAnalyticalReport,
   listBrokers,
   login,
   logout,
@@ -17,6 +19,7 @@ import {
 } from './api'
 
 type View = 'login' | 'register' | 'verify' | 'home'
+type HomeSection = 'brokers' | 'reports'
 
 function Logo() {
   return (
@@ -205,6 +208,81 @@ function BrokerPanel({ token }: { token: string }) {
   )
 }
 
+function ReportPanel({ token }: { token: string }) {
+  const [brokerId, setBrokerId] = useState('')
+  const [brokers, setBrokers] = useState<Broker[]>([])
+  const [analytics, setAnalytics] = useState<Record<string, unknown> | null>(null)
+  const [naturalReport, setNaturalReport] = useState('')
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [notice, setNotice] = useState<{ kind: 'error' | 'success' | 'info'; text: string } | null>(null)
+
+  useEffect(() => {
+    listBrokers(token)
+      .then(setBrokers)
+      .catch((error) => setNotice({ kind: 'error', text: getApiError(error, 'No pudimos cargar tus brokers.') }))
+  }, [token])
+
+  async function handleAnalytics() {
+    setLoadingAnalytics(true)
+    setNotice(null)
+    try {
+      setAnalytics(await getAnalyticalReport(token, brokerId || undefined))
+    } catch (error) {
+      setNotice({ kind: 'error', text: getApiError(error, 'No pudimos obtener el reporte JSON.') })
+    } finally { setLoadingAnalytics(false) }
+  }
+
+  async function handleNaturalReport() {
+    setGenerating(true)
+    setNotice(null)
+    try {
+      const result = await generateNaturalReport(token, brokerId || undefined)
+      setNaturalReport(result.report)
+      setNotice({ kind: 'success', text: 'Reporte generado correctamente.' })
+    } catch (error) {
+      setNotice({ kind: 'error', text: getApiError(error, 'No pudimos generar el reporte.') })
+    } finally { setGenerating(false) }
+  }
+
+  return (
+    <section className="report-section" aria-labelledby="reports-heading">
+      <div className="section-heading">
+        <p className="eyebrow">Análisis inteligente</p>
+        <h2 id="reports-heading">Reportes</h2>
+        <p>Consulta los datos de tus alertas o genera una explicación clara en lenguaje natural.</p>
+      </div>
+      {notice && <Message kind={notice.kind}>{notice.text}</Message>}
+      <div className="report-toolbar">
+        <label className="report-filter" htmlFor="report-broker">
+          <span>Alcance del reporte</span>
+          <select id="report-broker" value={brokerId} onChange={(event) => setBrokerId(event.target.value)}>
+            <option value="">Todos los brokers</option>
+            {brokers.map((broker) => <option key={broker.id} value={broker.id}>{broker.name}</option>)}
+          </select>
+        </label>
+      </div>
+      <div className="report-grid">
+        <article className="report-card">
+          <div className="card-title"><div><h3>Datos del reporte</h3><p>Consulta el resumen estructurado de tus alertas.</p></div><span aria-hidden="true">{'{}'}</span></div>
+          <button className="primary-button" onClick={() => void handleAnalytics()} disabled={loadingAnalytics}>
+            {loadingAnalytics ? 'Consultando…' : <>Ver reporte JSON <ArrowIcon /></>}
+          </button>
+          {analytics && <pre className="json-result" aria-label="Reporte JSON">{JSON.stringify(analytics, null, 2)}</pre>}
+          {!analytics && !loadingAnalytics && <p className="empty-state">Aún no has consultado un reporte.</p>}
+        </article>
+        <article className="report-card">
+          <div className="card-title"><div><h3>Resumen en lenguaje natural</h3><p>Convierte tus datos en una explicación fácil de entender.</p></div><span aria-hidden="true">Aa</span></div>
+          <button className="primary-button" onClick={() => void handleNaturalReport()} disabled={generating}>
+            {generating ? 'Generando…' : <>Generar resumen <ArrowIcon /></>}
+          </button>
+          {naturalReport ? <div className="natural-result" role="status">{naturalReport}</div> : <p className="empty-state">Tu resumen aparecerá aquí.</p>}
+        </article>
+      </div>
+    </section>
+  )
+}
+
 function App() {
   const [view, setView] = useState<View>('login')
   const [user, setUser] = useState<User | null>(null)
@@ -212,6 +290,7 @@ function App() {
   const [token, setToken] = useState('')
   const [notice, setNotice] = useState<{ kind: 'error' | 'success' | 'info'; text: string } | null>(null)
   const [loading, setLoading] = useState(false)
+  const [homeSection, setHomeSection] = useState<HomeSection>('brokers')
 
   useEffect(() => {
     refresh()
@@ -287,7 +366,11 @@ function App() {
           <p>Tu espacio de monitoreo está listo para comenzar.</p>
           <div className="token-note"><span className="status-dot" /> Conexión segura establecida</div>
         </section>
-        <BrokerPanel token={token} />
+        <nav className="home-tabs" aria-label="Secciones principales">
+          <button className={homeSection === 'brokers' ? 'home-tab active' : 'home-tab'} aria-selected={homeSection === 'brokers'} onClick={() => setHomeSection('brokers')}>Brokers MQTT</button>
+          <button className={homeSection === 'reports' ? 'home-tab active' : 'home-tab'} aria-selected={homeSection === 'reports'} onClick={() => setHomeSection('reports')}>Reportes</button>
+        </nav>
+        {homeSection === 'brokers' ? <BrokerPanel token={token} /> : <ReportPanel token={token} />}
       </main>
     )
   }

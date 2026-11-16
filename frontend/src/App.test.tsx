@@ -19,6 +19,8 @@ vi.mock('./api', async () => {
     createBroker: vi.fn(),
     deleteBroker: vi.fn(),
     rotateBrokerKey: vi.fn(),
+    getAnalyticalReport: vi.fn(),
+    generateNaturalReport: vi.fn(),
   }
 })
 
@@ -39,6 +41,8 @@ describe('authentication screens', () => {
     vi.mocked(authApi.createBroker).mockReset()
     vi.mocked(authApi.deleteBroker).mockReset()
     vi.mocked(authApi.rotateBrokerKey).mockReset()
+    vi.mocked(authApi.getAnalyticalReport).mockReset()
+    vi.mocked(authApi.generateNaturalReport).mockReset()
   })
 
   it('shows the login form and navigates to registration', async () => {
@@ -109,5 +113,24 @@ describe('authentication screens', () => {
     await user.click(screen.getByRole('button', { name: /Entrar/ }))
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Credenciales inválidas'))
+  })
+
+  it('switches to reports and shows both report actions', async () => {
+    const user = userEvent.setup()
+    vi.mocked(authApi.login).mockResolvedValue({ access_token: 'access-token', token_type: 'bearer', expires_in: 900 })
+    vi.mocked(authApi.getMe).mockResolvedValue({ id: 'u1', username: 'ana', email: 'ana@example.com', status: 'active', created_at: '2026-01-01' })
+    vi.mocked(authApi.getAnalyticalReport).mockResolvedValue({ total_alerts: 2 })
+    vi.mocked(authApi.generateNaturalReport).mockResolvedValue({ report: 'Se detectaron dos alertas.' })
+    render(<App />)
+    await user.type(screen.getByLabelText('Correo electrónico'), 'ana@example.com')
+    await user.type(screen.getByLabelText('Contraseña'), 'secreto123')
+    await user.click(screen.getByRole('button', { name: /Entrar/ }))
+    await user.click(await screen.findByRole('button', { name: 'Reportes' }))
+
+    expect(screen.getByRole('heading', { name: 'Reportes' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /Ver reporte JSON/ }))
+    expect(await screen.findByLabelText('Reporte JSON')).toHaveTextContent('"total_alerts": 2')
+    await user.click(screen.getByRole('button', { name: /Generar resumen/ }))
+    expect(await screen.findByText('Se detectaron dos alertas.')).toBeInTheDocument()
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { api, createBroker, getApiError, getMe, login, register, verifyEmail } from './api'
+import { api, createBroker, generateNaturalReport, getAnalyticalReport, getApiError, getMe, login, register, verifyEmail } from './api'
 
 describe('auth and broker API client', () => {
   it('configures credentials for the HttpOnly refresh cookie', () => {
@@ -41,5 +41,19 @@ describe('auth and broker API client', () => {
     const post = vi.spyOn(api, 'post').mockResolvedValueOnce({ data: response } as never)
     await expect(createBroker('token', { name: 'Producción', host: 'mqtt.local', port: 1883 })).resolves.toEqual(response)
     expect(post).toHaveBeenCalledWith('/brokers', { name: 'Producción', host: 'mqtt.local', port: 1883 }, { headers: { Authorization: 'Bearer token' } })
+  })
+
+  it('requests analytical and natural-language reports', async () => {
+    const get = vi.spyOn(api, 'get').mockResolvedValueOnce({ data: { total_alerts: 1 } } as never)
+    const post = vi.spyOn(api, 'post').mockResolvedValueOnce({ data: { report: 'Todo estable.' } } as never)
+    await expect(getAnalyticalReport('token', 'broker-1')).resolves.toEqual({ total_alerts: 1 })
+    await expect(generateNaturalReport('token', 'broker-1')).resolves.toEqual({ report: 'Todo estable.' })
+    expect(get).toHaveBeenCalledWith('/reports/analytics', {
+      headers: { Authorization: expect.any(String) },
+      params: { broker_id: 'broker-1' },
+    })
+    expect(post).toHaveBeenCalledWith('/reports', { broker_id: 'broker-1' }, {
+      headers: { Authorization: expect.any(String) },
+    })
   })
 })
