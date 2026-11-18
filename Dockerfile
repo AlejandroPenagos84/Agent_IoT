@@ -1,26 +1,18 @@
 ARG BASE_IMAGE=python:3.11-slim
 FROM ${BASE_IMAGE}
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONPATH=/app/src
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONPATH=/app/src
 WORKDIR /app
 
-# Install minimal system dependencies for building wheels
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    git \
-    curl \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
+# Todas las dependencias tienen wheels: sin compiladores, git ni curl.
 COPY requirements.txt /app/requirements.txt
+RUN pip install -r /app/requirements.txt
 
-# Upgrade pip and install Python dependencies
-RUN python -m pip install --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir -r /app/requirements.txt
-
-# Código de la app, modelos exportados y el simulador del laboratorio.
+# Código de la app, modelo exportado y el simulador del laboratorio.
 COPY src /app/src
 COPY modelos_agente_tcp /app/modelos_agente_tcp
 COPY simulation /app/simulation

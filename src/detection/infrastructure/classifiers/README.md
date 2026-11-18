@@ -8,13 +8,14 @@ The only active adapter is `TcpXgbClassifier` (modelo final B).
 for the TCP model: the capture sidecar already computes causal per-frame TCP
 features, so the model scores each row independently.
 
-Heavy imports (`xgboost`, `joblib`) are lazy, so merely importing this package
+Heavy imports (`xgboost`, `numpy`) are lazy, so merely importing this package
 does not require loading the model.
 
 ## `TcpXgbClassifier` (modelo final B, solo TCP)
 
-Carga `modelos_agente_tcp/` (`03_modelo_tcp.ipynb`): `xgb_tcp.ubj`,
-`le_target.joblib` y `pipeline_config.json` (`feature_mode='tcp'`). Valida que el
+Carga `modelos_agente_tcp/` (`03_modelo_tcp.ipynb`): `xgb_tcp.ubj` y
+`pipeline_config.json` (`feature_mode='tcp'`). Las etiquetas salen de
+`class_names`; `le_target.joblib` ya no se carga (sin scikit-learn). Valida que el
 booster exponga exactamente `feature_columns_tcp`. No calcula features: el sidecar
 ya envía las 12 features TCP causales de cada frame en `tcp_features`, y el
 worker del broker las entrega tal cual, omitiendo los registros sin ellas

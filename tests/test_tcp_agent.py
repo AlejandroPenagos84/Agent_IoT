@@ -11,7 +11,7 @@ from wire.protocol import TCP_FEATURE_COLUMNS
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_DIR = ROOT / 'modelos_agente_tcp'
-HAS_XGB = all(importlib.util.find_spec(m) for m in ('xgboost', 'pandas', 'joblib'))
+HAS_XGB = all(importlib.util.find_spec(m) for m in ('xgboost', 'numpy'))
 
 
 class Source(FeatureSource):

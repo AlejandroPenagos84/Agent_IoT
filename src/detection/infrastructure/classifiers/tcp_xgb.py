@@ -21,8 +21,7 @@ class TcpXgbClassifier(Classifier):
     """Load `modelos_agente_tcp/` and label every row of the window."""
 
     def __init__(self, model_dir: str | None = None, threshold: float = 0.5):
-        """Load and validate the exported TCP model, encoder and contract."""
-        import joblib
+        """Load and validate the exported TCP model and its contract."""
         from xgboost import XGBClassifier
 
         if not model_dir:
@@ -35,11 +34,11 @@ class TcpXgbClassifier(Classifier):
             )
         self.columns = list(self.cfg['feature_columns_tcp'])
         self.threshold = threshold
-        self.le = joblib.load(os.path.join(model_dir, 'le_target.joblib'))
-        if list(self.le.classes_) != list(self.cfg['class_names']):
-            raise ValueError(
-                f'le_target {list(self.le.classes_)} != class_names {self.cfg["class_names"]}'
-            )
+        # Las etiquetas salen de pipeline_config.json (mismo orden que el
+        # LabelEncoder del notebook); así la imagen no necesita scikit-learn.
+        self.class_names = [str(name) for name in self.cfg['class_names']]
+        if len(self.class_names) != 2:
+            raise ValueError(f'{model_dir}: class_names debe tener 2 clases: {self.class_names}')
         self.xgb = XGBClassifier()
         self.xgb.load_model(os.path.join(model_dir, self.cfg.get('model_file', MODEL_FILE)))
         validate_named_features(
@@ -77,4 +76,4 @@ class TcpXgbClassifier(Classifier):
         codes = [
             attack_idx if p >= self.threshold else normal_idx for p in self.predict_proba(window)
         ]
-        return [str(label) for label in self.le.inverse_transform(codes)]
+        return [self.class_names[code] for code in codes]

@@ -1,13 +1,18 @@
+# Solo entran requirements.txt, src/, modelos_agente_tcp/ y simulation/.
 .venv
 __pycache__
 **/__pycache__
 *.pyc
 *.zip
+*.ipynb
 .git
 .gitignore
-ml-mqtt-model.ipynb
-mosquitto/certs
-mosquitto/log
 .env
-
 certs
+mosquitto
+frontend
+ML_Model
+dataset
+docs
+tests
+deploy
