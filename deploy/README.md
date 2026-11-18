@@ -4,7 +4,7 @@ El sistema tiene dos partes que se despliegan por separado:
 
 | Parte | Qué corre | Dónde | Archivo |
 |---|---|---|---|
-| **Central** | `app` (API + agente de detección), `redis`, `caddy`, `certgen` | tu servidor | `docker-compose.yml` |
+| **Central** | `app` (API + agente de detección), `web` (nginx + frontend), `redis`, `caddy`, `certgen` | tu servidor | `docker-compose.yml` |
 | **Captura** | `agentiot-capture` (tshark → features → agente) | junto al Mosquitto de cada cliente | `Dockerfile.capture` |
 
 ```mermaid
@@ -16,8 +16,9 @@ flowchart LR
     end
     subgraph CENTRAL["Central"]
         CADDY["Caddy :443"]
+        WEB["web (nginx)<br/>frontend + /api"]
         APP["app<br/>API :8000 + agente :8443"]
-        CADDY --> APP
+        CADDY --> WEB --> APP
     end
     CAP -- "HTTPS: inscripción y heartbeat" --> CADDY
     CAP -- "TLS 8443: features NDJSON" --> APP
@@ -36,6 +37,19 @@ entrega la API al inscribirse, a partir de estas variables de la central:
 | `AGENT_TLS_SERVER_NAME` | nombre que debe tener el certificado del agente | `app` | `agent.tudominio.com` |
 | `AGENT_CA_PATH` | CA que se le entrega para verificar al agente | `/certs/agent/ca.crt` (certgen) | vacío (CA pública) |
 | `CAPTURE_IMAGE` | imagen del comando de instalación | `agentiot-capture:latest` | `ghcr.io/<org>/agentiot-capture:latest` |
+
+### Proxy nginx (`web`)
+
+`web` construye el frontend (`frontend/Dockerfile`, multi-stage Node → nginx) y
+lo sirve con `deploy/nginx/default.conf`:
+
+- `/api/*` y `/health` → `app:8000` (timeout de lectura 330 s por los reportes de Ollama).
+- `/assets/*` → caché de 1 año (archivos con hash de Vite).
+- Cualquier otra ruta → `index.html` (SPA).
+
+Caddy termina TLS y reenvía todo a `web:80`. Sin TLS, para pruebas locales:
+`http://127.0.0.1:8081` (`WEB_PORT`). Tras cambiar la config:
+`docker compose restart web`; tras cambiar el frontend: `docker compose up -d --build web`.
 
 ---
 

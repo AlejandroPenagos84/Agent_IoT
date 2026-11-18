@@ -11,7 +11,8 @@
 	request_body {
 		max_size 1MB
 	}
-	reverse_proxy app:8000
+	# nginx (web) sirve el frontend y reenvía /api a app:8000.
+	reverse_proxy web:80
 	header -Server
 }
 
