@@ -93,7 +93,7 @@ TOKEN=$(curl -s -X POST $API/auth/login -H 'Content-Type: application/json' \
 
 curl -s -X POST $API/brokers -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"name":"mosquitto-cliente","host":"mosquitto-cliente","port":1883}'
+  -d '{"name":"mosquitto","host":"mosquitto","port":1883}'
 # → "enrollment_key": "ek_...", "install_command": "docker run ..."
 ```
 
@@ -106,7 +106,7 @@ La clave `ek_...` se muestra **una sola vez**. Si se pierde:
 docker compose -f docker-compose.mosquitto.yml up -d
 ```
 
-Levanta `mosquitto-cliente` en la red `agent_iot_default`, con MQTT 1883 sin
+Levanta `mosquitto` en la red `agent_iot_default`, con MQTT 1883 sin
 autenticación (expuesto en `127.0.0.1:1884` para publicar desde tu máquina).
 
 ### 1.4 Captura
@@ -115,7 +115,7 @@ autenticación (expuesto en `127.0.0.1:1884` para publicar desde tu máquina).
 docker build -f Dockerfile.capture -t agentiot-capture:latest .
 
 docker run -d --name agentiot-capture --restart unless-stopped \
-  --network container:mosquitto-cliente --cap-add NET_RAW \
+  --network container:mosquitto --cap-add NET_RAW \
   -v agentiot-capture-state:/state \
   -e ENROLL_KEY=ek_... \
   -e API_URL=http://app:8000 \
@@ -137,12 +137,12 @@ El simulador viene en la imagen `agentiot-app`:
 ```bash
 # Normal: el broker pasa a "connected", sin alertas
 docker run --rm --network agent_iot_default agentiot-app:latest \
-  python -m simulation --broker mosquitto-cliente --port 1883 \
+  python -m simulation --broker mosquitto --port 1883 \
   --ataque none --paquetes 500 --intervalo 0.1
 
 # DoS: genera alertas
 docker run --rm --network agent_iot_default agentiot-app:latest \
-  python -m simulation --broker mosquitto-cliente --port 1883 \
+  python -m simulation --broker mosquitto --port 1883 \
   --ataque dos --dos-mode flood --force-attack --paquetes 30000
 ```
 

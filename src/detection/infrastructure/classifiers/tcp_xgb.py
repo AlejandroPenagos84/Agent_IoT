@@ -22,7 +22,9 @@ class TcpXgbClassifier(Classifier):
 
     def __init__(self, model_dir: str | None = None, threshold: float = 0.5):
         """Load and validate the exported TCP model and its contract."""
-        from xgboost import XGBClassifier
+        # Booster y no XGBClassifier: el envoltorio de sklearn exige scikit-learn,
+        # que la imagen no instala.
+        from xgboost import Booster
 
         if not model_dir:
             raise ValueError('TcpXgbClassifier necesita model_dir (modelos_agente_tcp)')
@@ -39,12 +41,11 @@ class TcpXgbClassifier(Classifier):
         self.class_names = [str(name) for name in self.cfg['class_names']]
         if len(self.class_names) != 2:
             raise ValueError(f'{model_dir}: class_names debe tener 2 clases: {self.class_names}')
-        self.xgb = XGBClassifier()
-        self.xgb.load_model(os.path.join(model_dir, self.cfg.get('model_file', MODEL_FILE)))
+        self._booster = Booster()
+        self._booster.load_model(os.path.join(model_dir, self.cfg.get('model_file', MODEL_FILE)))
         validate_named_features(
-            self.columns, self.xgb.get_booster().feature_names, 'TcpXgbClassifier xgb_tcp'
+            self.columns, self._booster.feature_names, 'TcpXgbClassifier xgb_tcp'
         )
-        self._booster = self.xgb.get_booster()
         self._booster.feature_names = None  # entrada numpy en el orden validado
         self._booster.set_param({'nthread': 1})
 

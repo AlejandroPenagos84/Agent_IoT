@@ -10,7 +10,7 @@ name: mosquitto-cliente
 services:
   mosquitto:
     image: eclipse-mosquitto:2
-    container_name: mosquitto-cliente
+    container_name: mosquitto
     # Config incluida en la imagen: listener 1883, sin autenticación.
     command: ["mosquitto", "-c", "/mosquitto-no-auth.conf"]
     ports:
